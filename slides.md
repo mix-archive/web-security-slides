@@ -5,12 +5,7 @@ theme: seriph
 # like them? see https://unsplash.com/collections/94734566/slidev
 background: https://cover.sli.dev
 # some information about your slides (markdown enabled)
-title: Welcome to Slidev
-info: |
-  ## Slidev Starter Template
-  Presentation slides for developers.
-
-  Learn more at [Sli.dev](https://sli.dev)
+title: Web Security Slides
 # apply unocss classes to the current slide
 class: text-center
 # https://sli.dev/features/drawing
@@ -22,19 +17,14 @@ transition: slide-left
 mdc: true
 ---
 
-# Welcome to Slidev
+<!-- markdownlint-disable single-title no-inline-html heading-style blanks-around-headings -->
 
-Presentation slides for developers
+# Web 安全常见漏洞
 
-<div @click="$slidev.nav.next" class="mt-12 py-1" hover:bg="white op-10">
-  Press Space for next page <carbon:arrow-right />
-</div>
+Mix
 
 <div class="abs-br m-6 text-xl">
-  <button @click="$slidev.nav.openInEditor" title="Open in Editor" class="slidev-icon-btn">
-    <carbon:edit />
-  </button>
-  <a href="https://github.com/slidevjs/slidev" target="_blank" class="slidev-icon-btn">
+  <a href="https://github.com/mnixry" target="_blank" class="slidev-icon-btn">
     <carbon:logo-github />
   </a>
 </div>
@@ -44,29 +34,25 @@ The last comment block of each slide will be treated as slide notes. It will be 
 -->
 
 ---
+layout: center
 transition: fade-out
 ---
 
-# What is Slidev?
+# 常见漏洞：原型链污染
 
-Slidev is a slides maker and presenter designed for developers, consist of the following features
+原型链污染 (Prototype Pollution) 是一种通过修改对象原型来实现的漏洞，导致了一些意外的行为。该漏洞主要发生在 JavaScript 中，在其他语言例如 Python 中也有类似的问题。
 
-- 📝 **Text-based** - focus on the content with Markdown, and then style them later
-- 🎨 **Themable** - themes can be shared and re-used as npm packages
-- 🧑‍💻 **Developer Friendly** - code highlighting, live coding with autocompletion
-- 🤹 **Interactive** - embed Vue components to enhance your expressions
-- 🎥 **Recording** - built-in recording and camera view
-- 📤 **Portable** - export to PDF, PPTX, PNGs, or even a hostable SPA
-- 🛠 **Hackable** - virtually anything that's possible on a webpage is possible in Slidev
-<br>
-<br>
+```js
+// 原型链污染
+Object.prototype.isAdmin = true;
+```
 
-Read more about [Why Slidev?](https://sli.dev/guide/why)
-
-<!--
-You can have `style` tag in markdown to override the style for the current page.
-Learn more: https://sli.dev/features/slide-scope-style
--->
+```js
+// 检查用户是否为管理员
+if (user.isAdmin) {
+  console.log("Admin access granted");
+}
+```
 
 <style>
 h1 {
@@ -80,9 +66,351 @@ h1 {
 }
 </style>
 
-<!--
-Here is another comment.
--->
+---
+layout: image-right
+image: ./images/jetbrains-pl-rank.png
+---
+
+## 为什么我们会对原型链污染感兴趣？
+
+- JavaScript 生态工具链纷杂繁复，依赖众多
+
+  - 38% 的流行包处于不活跃状态，很可能存在安全风险 （2022）
+
+- 这种漏洞很容易写出来且难以通过常规手段发现 (Linters, SAST)
+- 一次污染，全局遭殃
+
+- 可能存在这些漏洞的语言正在变得越来越流行
+  - TIOBE：JavaScript rk 6, Python rk 1
+  - JetBrains：JavaScript rk 1, Python rk 2
+
+---
+
+## 什么是原型，什么是原型链？
+
+原型 (Prototype) 是主要的 JavaScript 继承特性。在 JavaScript 中，对象是通过使用 `{}` 语法创建的。例如：
+
+```js
+const my_object = { a: 1, b: 2 };
+```
+
+JSON 是 「JavaScript Object Notation (JavaScript 对象表示法)」 的缩写，所以即使你没有见过 JavaScript，但是也应该对这个语法非常熟悉。
+
+这个对象有两个属性：`a` 和 `b`。如果我们想要访问 `a` 的值，我们可以使用点表示法或括号表示法：
+
+```js {0|1-3|4-5|all}
+console.log(my_object.a);
+// 输出：1
+// 在功能上等同于
+console.log(my_object["a"]);
+// 也输出：1
+```
+
+如果我们想要向对象添加一个新属性，我们可以使用与上面相同的语法，无论是点表示法还是括号表示法：
+
+```js {0|1|2|3-4|all}
+my_object.c = 3;
+my_object["d"] = 4;
+console.log(my_object);
+// 输出：{a: 1, b: 2, c: 3, d: 4}
+```
+
+---
+
+### 原型基础：对象的 DNA 结构
+
+```javascript
+const animal = { eats: true };
+const dog = { barks: true };
+
+// 建立原型链连接
+Object.setPrototypeOf(dog, animal);
+
+console.log(dog.barks); // true (自有属性)
+console.log(dog.eats); // true (继承属性)
+```
+
+<div v-click>
+
+```mermaid
+graph LR
+    A[dog] -->|<code>\_\_proto\_\_</code>| B[animal]
+    B -->|<code>\_\_proto\_\_</code>| C[Object.prototype]
+    C -->|<code>\_\_proto\_\_</code>| D[null]
+```
+
+</div>
+
+---
+layout: two-cols-header
+---
+
+### 当 Class 遇上原型：ES6 的语法糖衣
+
+::left::
+
+- ES6
+
+```js {all|2-4|6-8|1-9|11|12-15|16-19|22-23|all}{lines:true}
+class Animal {
+  constructor(name) {
+    this.name = name;
+  }
+
+  speak() {
+    console.log(`${this.name} makes a noise`);
+  }
+}
+
+class Dog extends Animal {
+  constructor(name) {
+    super(name); // 调用父类构造函数
+  }
+
+  speak() {
+    super.speak();
+    console.log("Woof!");
+  }
+}
+
+const dog = new Dog("Rex");
+dog.speak(); // 输出：Rex makes a noise\nWoof!
+```
+
+::right::
+
+<div v-click="8" class="ml-xs">
+
+- ES5：
+
+```js {all|1-3|5-7|9-12|13-18|20-22|all}{lines:true}
+function Animal(name) {
+  this.name = name;
+}
+
+Animal.prototype.speak = function () {
+  console.log(`${this.name} makes a noise`);
+};
+
+function Dog() {
+  Animal.call(this); // 调用父类构造函数
+}
+
+Dog.prototype = Object.create(Animal.prototype); // 继承原型
+Dog.prototype.constructor = Dog; // 设置构造函数
+Dog.prototype.speak = function () {
+  super.speak();
+  console.log("Woof!");
+};
+
+var dog = new Dog("Rex"); // BTW，const 和 let 也是 ES6 的特性
+dog.speak(); // 输出：Rex makes a noise\nWoof!
+```
+
+</div>
+
+<div v-click class="absolute bg-white px-10 left-0px top-100px w-100vw">
+
+```mermaid
+graph LR
+  D[new Dog] -->|<code>\_\_proto\_\_</code>| DC[Dog.prototype]
+  DC -->|<code>\_\_proto\_\_</code>| AC[Animal.prototype]
+  AC -->|<code>\_\_proto\_\_</code>| OP[Object.prototype]
+```
+
+</div>
+
+---
+layout: two-cols-header
+---
+
+### 原型操作：穿越继承链的三种方式
+
+::left::
+
+```js {all|1-4|6-9|11-15|all}{lines:true}
+// 1. 通过构造函数
+function Animal() {}
+const obj = new Animal();
+console.log(obj.__proto__ === Animal.prototype); // true
+
+// 2. Object.create 直接指定原型
+const protoObj = { x: 1 };
+const child = Object.create(protoObj);
+console.log(child.x); // 1
+
+// 3. 现代 API 操作
+const parent = { y: 2 };
+const child = {};
+Object.setPrototypeOf(child, parent);
+console.log(child.y); // 2
+```
+
+<v-clicks>
+
+- 如果是写代码的话，直接修改 `__proto__` 会导致性能问题 （JIT 优化）
+- 推荐使用 `Object.create` / `Object.getPrototypeOf` 来操作原型。
+
+</v-clicks>
+
+::right::
+
+<div v-click class="mb-10 pl-xs">
+
+#### `__proto__` 和 `prototype` 的区别
+
+- `__proto__` 是对象上的一个属性，指向对象的原型：
+
+  ```js
+  const obj = {};
+  obj.__proto__ = { a: 1 };
+  console.log(obj.a); // 1
+  ```
+
+- `prototype` 是构造函数上的一个属性，指向构造函数内 `this` 的原型：
+
+  ```js
+  const Animal = function () {};
+  Animal.prototype = { eats: true };
+
+  const dog = new Animal();
+  console.log(dog.eats); // true
+  ```
+
+</div>
+
+---
+
+### 原型链的尽头：`Object.prototype`
+
+```js {all|1-3|6-8|9-11|all}{lines:true}
+const arr = [1, 2, 3];
+console.log(arr.__proto__ === Array.prototype); // true
+console.log(arr.toString()); // "1,2,3" 来自 Object.prototype
+
+// 追溯完整继承链：
+console.log(
+  arr.__proto__.__proto__ === Object.prototype, // true
+);
+console.log(
+  arr.__proto__.__proto__.__proto__, // null
+);
+```
+
+<v-clicks>
+
+- 🚩 所有内置类型（`Array`/`Date` 等）最终都继承自 `Object.prototype`
+- 💣 修改 `Object.prototype` 会影响**所有对象**
+
+</v-clicks>
+
+---
+
+## 原型链污染的成因
+
+```mermaid
+graph LR
+    A[用户可控输入] --> B{危险操作点}
+    B --> C[递归对象合并]
+    B --> D[动态属性赋值]
+    B --> E[JSON 敏感解析]
+    B --> F[不安全的深拷贝]
+    C --> G((污染原型链))
+    D --> G
+    E --> G
+    F --> G
+```
+
+<v-clicks>
+
+- 🎯 四类高危操作承载 90% 的原型链污染漏洞
+- 🔥 用户输入 → 危险 API → 原型篡改 的三段式攻击链
+
+</v-clicks>
+
+---
+
+### 漏洞代码沙盘：递归合并陷阱
+
+```js {monaco-run}
+// 危险的对象合并实现
+function merge(target, source) {
+  for (const key in source) {
+    if (typeof source[key] === "object" && source[key] !== null) {
+      if (!target[key]) {
+        target[key] = {};
+      }
+      merge(target[key], source[key]); // 递归陷阱
+    } else {
+      target[key] = source[key]; // 污染触发点
+    }
+  }
+}
+
+// 攻击者输入
+const maliciousPayload = JSON.parse('{"__proto__":{"isAdmin":true}}');
+merge({}, maliciousPayload); // 发起污染攻击
+
+console.log({}.isAdmin); // 输出 true
+```
+
+---
+
+### 动态属性赋值的黑暗面
+
+```js {monaco-run}
+function setValue(obj, key, value) {
+  const segments = key.split(".");
+  const lastSegment = segments.pop();
+  for (const segment of segments) {
+    const accessor = Array.isArray(obj) ? +segment : segment;
+    if (!(accessor in obj)) obj[accessor] = {};
+    obj = obj[accessor];
+  }
+  obj[lastSegment] = value;
+}
+
+// 攻击向量
+setValue({}, "__proto__.polluted", "HACKED");
+
+// 灾难性后果
+console.log({}.polluted); // 输出 "HACKED"
+```
+
+<v-clicks>
+
+💣 高危特征：
+
+- 使用 `obj[key] = value` 形式
+- 支持通过 `.` 分割的嵌套路径（如 `a.b.c`）
+
+</v-clicks>
+
+---
+
+### 深拷贝引发的血案
+
+```js {monaco-run}
+function deepClone(obj) {
+  if (typeof obj !== "object" || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(deepClone);
+  const clone = {};
+  for (const key in obj) clone[key] = deepClone(obj[key]);
+  return clone;
+}
+
+function register(user, role = "user") {
+  delete user.role;
+  const session = deepClone(user);
+  if (role === "admin") {
+    session.isAdmin = true;
+  }
+  return session;
+}
+
+const user = register(JSON.parse('{"__proto__":{"isAdmin":true}}'));
+console.log(user.isAdmin); // 输出 true
+```
 
 ---
 transition: slide-up
@@ -95,20 +423,22 @@ Hover on the bottom-left corner to see the navigation's controls panel, [learn m
 
 ## Keyboard Shortcuts
 
-|                                                     |                             |
-| --------------------------------------------------- | --------------------------- |
-| <kbd>right</kbd> / <kbd>space</kbd>                 | next animation or slide     |
-| <kbd>left</kbd>  / <kbd>shift</kbd><kbd>space</kbd> | previous animation or slide |
-| <kbd>up</kbd>                                       | previous slide              |
-| <kbd>down</kbd>                                     | next slide                  |
+|                                                    |                             |
+| -------------------------------------------------- | --------------------------- |
+| <kbd>right</kbd> / <kbd>space</kbd>                | next animation or slide     |
+| <kbd>left</kbd> / <kbd>shift</kbd><kbd>space</kbd> | previous animation or slide |
+| <kbd>up</kbd>                                      | previous slide              |
+| <kbd>down</kbd>                                    | next slide                  |
 
 <!-- https://sli.dev/guide/animations.html#click-animation -->
+
 <img
   v-click
   class="absolute -bottom-9 -left-7 w-80 opacity-50"
   src="https://sli.dev/assets/arrow-bottom-left.svg"
   alt=""
 />
+
 <p v-after class="absolute bottom-23 left-45 opacity-30 transform -rotate-10">Here!</p>
 
 ---
@@ -132,7 +462,7 @@ The title will be inferred from your slide content, or you can override it with 
 
 ---
 layout: image-right
-image: https://cover.sli.dev
+image: <https://cover.sli.dev>
 ---
 
 # Code
@@ -144,17 +474,18 @@ Use code snippets and get the highlighting directly, and even types hover!
 // and errors in markdown code blocks
 // More at https://shiki.style/packages/twoslash
 
-import { computed, ref } from 'vue'
+import { computed, ref } from "vue";
 
-const count = ref(0)
-const doubled = computed(() => count.value * 2)
+const count = ref(0);
+const doubled = computed(() => count.value * 2);
 
-doubled.value = 2
+doubled.value = 2;
 ```
 
 <arrow v-click="[4, 5]" x1="350" y1="310" x2="195" y2="334" color="#953" width="2" arrowSize="1" />
 
 <!-- This allow you to embed external code blocks -->
+
 <<< @/snippets/external.ts#snippet
 
 <!-- Footer -->
@@ -198,13 +529,13 @@ Add multiple code blocks and wrap them with <code>````md magic-move</code> (four
 ```ts {*|2|*}
 // step 1
 const author = reactive({
-  name: 'John Doe',
+  name: "John Doe",
   books: [
-    'Vue 2 - Advanced Guide',
-    'Vue 3 - Basic Guide',
-    'Vue 4 - The Mystery'
-  ]
-})
+    "Vue 2 - Advanced Guide",
+    "Vue 3 - Basic Guide",
+    "Vue 4 - The Mystery",
+  ],
+});
 ```
 
 ```ts {*|1-2|3-4|3-4,8}
@@ -213,16 +544,16 @@ export default {
   data() {
     return {
       author: {
-        name: 'John Doe',
+        name: "John Doe",
         books: [
-          'Vue 2 - Advanced Guide',
-          'Vue 3 - Basic Guide',
-          'Vue 4 - The Mystery'
-        ]
-      }
-    }
-  }
-}
+          "Vue 2 - Advanced Guide",
+          "Vue 3 - Basic Guide",
+          "Vue 4 - The Mystery",
+        ],
+      },
+    };
+  },
+};
 ```
 
 ```ts
@@ -230,15 +561,15 @@ export default {
 export default {
   data: () => ({
     author: {
-      name: 'John Doe',
+      name: "John Doe",
       books: [
-        'Vue 2 - Advanced Guide',
-        'Vue 3 - Basic Guide',
-        'Vue 4 - The Mystery'
-      ]
-    }
-  })
-}
+        "Vue 2 - Advanced Guide",
+        "Vue 3 - Basic Guide",
+        "Vue 4 - The Mystery",
+      ],
+    },
+  }),
+};
 ```
 
 Non-code blocks are ignored.
@@ -247,13 +578,13 @@ Non-code blocks are ignored.
 <!-- step 4 -->
 <script setup>
 const author = {
-  name: 'John Doe',
+  name: "John Doe",
   books: [
-    'Vue 2 - Advanced Guide',
-    'Vue 3 - Basic Guide',
-    'Vue 4 - The Mystery'
-  ]
-}
+    "Vue 2 - Advanced Guide",
+    "Vue 3 - Basic Guide",
+    "Vue 4 - The Mystery",
+  ],
+};
 </script>
 ```
 ````
@@ -459,7 +790,9 @@ LaTeX is supported out-of-box. Powered by [KaTeX](https://katex.org/).
 Inline $\sqrt{3x-1}+(1+x)^2$
 
 Block
-$$ {1|3|all}
+
+$$
+{1|3|all}
 \begin{aligned}
 \nabla \cdot \vec{E} &= \frac{\rho}{\varepsilon_0} \\
 \nabla \cdot \vec{B} &= 0 \\
@@ -607,26 +940,33 @@ Slidev provides built-in Monaco Editor support.
 Add `{monaco}` to the code block to turn it into an editor:
 
 ```ts {monaco}
-import { ref } from 'vue'
-import { emptyArray } from './external'
+import { ref } from "vue";
+import { emptyArray } from "./external";
 
-const arr = ref(emptyArray(10))
+const arr = ref(emptyArray(10));
 ```
 
 Use `{monaco-run}` to create an editor that can execute the code directly in the slide:
 
 ```ts {monaco-run}
-import { version } from 'vue'
-import { emptyArray, sayHello } from './external'
+import { version } from "vue";
+import { emptyArray, sayHello } from "./external";
 
-sayHello()
-console.log(`vue ${version}`)
-console.log(emptyArray<number>(10).reduce(fib => [...fib, fib.at(-1)! + fib.at(-2)!], [1, 1]))
+sayHello();
+console.log(`vue ${version}`);
+console.log(
+  emptyArray<number>(10).reduce(
+    (fib) => [...fib, fib.at(-1)! + fib.at(-2)!],
+    [1, 1],
+  ),
+);
 ```
 
 ---
 layout: center
 class: text-center
+dragPos:
+  square: 0,-5,0,0
 ---
 
 # Learn More
