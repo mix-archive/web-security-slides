@@ -1,6 +1,6 @@
 ---
 # You can also start simply with 'default'
-theme: seriph
+theme: default
 # random image from a curated Unsplash collection by Anthony
 # like them? see https://unsplash.com/collections/94734566/slidev
 background: https://cover.sli.dev
@@ -392,10 +392,10 @@ console.log({}.polluted); // 输出 "HACKED"
 
 ```js {monaco-run}
 function deepClone(obj) {
-  if (typeof obj !== "object" || obj === null) return obj;
-  if (Array.isArray(obj)) return obj.map(deepClone);
+  if (typeof obj !== "object" || obj === null) return obj; // 基本类型或 null 直接返回
+  if (Array.isArray(obj)) return obj.map(deepClone); // 数组类型
   const clone = {};
-  for (const key in obj) clone[key] = deepClone(obj[key]);
+  for (const key in obj) clone[key] = deepClone(obj[key]); // 遍历对象属性
   return clone;
 }
 
@@ -411,6 +411,96 @@ function register(user, role = "user") {
 const user = register(JSON.parse('{"__proto__":{"isAdmin":true}}'));
 console.log(user.isAdmin); // 输出 true
 ```
+
+---
+
+## 原型链污染：利用方法
+
+有以下几种思路：
+
+- 影响鉴权参数，结合业务逻辑达成在系统内提升用户权限
+- 利用模板引擎解析功能，达成 RCE
+- 使用系统内已有的 Gadget 达成 RCE （Node.js `child_process` 等）
+
+---
+
+### 题目：funny login （DiceCTF Quals 2024）
+
+使用提供的容器镜像，启动服务：
+
+```shell
+docker load -i funnylogin.tar
+docker run --rm -p 3000:3000 funnylogin
+```
+
+看看如何使用漏洞组合，得到 Flag？
+
+---
+
+#### 解题思路
+
+<v-clicks>
+
+- 首先注意到没有对用户输入进行控制或 sanitization 就直接进行了 SQL 查询。
+- 这意味着我们可以注入 SQL 查询，但问题是我们不知道用户是否有 `isAdmin` 为 `true`，因为它是随机的。
+- 因此，我们需要找到一种方法来控制 `isAdmin` 的值。
+- 注意到 `__proto__` 是 JavaScript 中的一个特殊属性，它指向对象的原型。
+- 因此，我们可以将 `__proto__` 作为用户名注入，这样我们就可以做到 `isAdmin[user]==true`。
+
+  ```js
+  if (users[id] && isAdmin[user]) {
+    return res.redirect("/?flag=" + encodeURIComponent(FLAG));
+  }
+  ```
+
+- 用户名 `__proto__`，密码 `1' or id=1; --` 即可绕过密码验证。
+
+</v-clicks>
+
+---
+
+### 题目：login please （ImaginaryCTF 2022）
+
+使用提供的容器镜像，启动服务：
+
+```shell
+docker load -i loginplease.tar
+docker run --rm -p 5001:5001 loginplease
+```
+
+请阅读源码，找到问题所在并得到 Flag。
+
+---
+
+#### 解题思路
+
+<v-clicks>
+
+- `Object.assign` 将一个或者多个源对象中所有可枚举的自有属性复制到目标对象，并返回修改后的目标对象。
+
+```js {monaco-run}
+const obj = JSON.parse('{"__proto__":{"username":"admin"}}');
+console.log(obj, obj.username === undefined);
+Object.assign({}, obj).username;
+```
+
+- 同时给出的程序支持传入 `urlencoded` 和 `json` 格式的请求体
+
+  ```js
+  app.use(urlencoded({ extended: false }));
+  app.use(json());
+  ```
+
+  - 因此我们可以通过 `Content-Type: application/json` 来传入 `json` 格式的请求体。
+
+```json
+{
+  "__proto__": { "username": "admin" },
+  "password": "admin"
+}
+```
+
+</v-clicks>
 
 ---
 transition: slide-up
