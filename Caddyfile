@@ -1,0 +1,6 @@
+:8080 {
+    root * ./dist
+    encode
+    file_server
+    try_files {path} /index.html
+}
