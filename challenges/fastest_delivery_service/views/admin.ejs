@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin - View Orders</title>
+</head>
+<body>
+    <h1>Orders</h1>
+    <% if (orders.length > 0) { %>
+        <ul>
+        <% orders.forEach(order => { %>
+            <li><%= order.username %> ordered <%= order.quantity %> x <%= order.item %></li>
+        <% }) %>
+        </ul>
+    <% } else { %>
+        <p>No orders yet.</p>
+    <% } %>
+    <a href="/">Back to Home</a>
+</body>
+</html>

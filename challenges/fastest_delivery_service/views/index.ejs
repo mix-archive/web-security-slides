@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Food Delivery Service</title>
+</head>
+<body>
+    <h1>Welcome to the Food Delivery Service</h1>
+    <% if (user) { %>
+        <p>Hello, <%= user.username %>!</p>
+        <a href="/order">Place an Order</a>
+        <a href="/logout">Logout</a>
+    <% } else { %>
+        <a href="/login">Login</a> | 
+        <a href="/register">Register</a>
+    <% } %>
+</body>
+</html>
