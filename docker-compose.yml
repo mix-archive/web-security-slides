@@ -1,0 +1,17 @@
+name: wss
+
+services:
+  challenges-fastest-delivery-service:
+    image: fastest_delivery_service
+    ports:
+      - 5000:3000
+
+  challenges-funnylogin:
+    image: funnylogin
+    ports:
+      - 5001:3000
+
+  challenges-loginplease:
+    image: loginplease
+    ports:
+      - 5002:5001
