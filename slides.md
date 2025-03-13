@@ -1729,10 +1729,307 @@ layout: two-cols-header
 根据之前说的 Node.js 原型链污染到 RCE 的原理，可以污染 `__proto__` 来实现 RCE。
 
 ```json
-{"ip": "`id`", "__proto__": {"shell": true}}
+{ "ip": "`id`", "__proto__": { "shell": true } }
 ```
 
 此时因为开启了 `shell` 选项，而 shell 会执行由反引号包裹的命令，所以会执行 `id` 命令。
 
 ![pingline polluted](./images/pingline-polluted.png)
 
+---
+
+## 原型链污染漏洞的防御
+
+防御主要包含以下几个层级：
+
+- 重点库（动态代码生成、命令执行等）的输入检查/过滤
+- 使用安全的函数/库来替代存在问题的函数/库
+- 在全局禁用对 `Object.prototype` 的修改
+
+---
+
+### 输入检查 & 过滤：Node.js `child_process` 模块
+
+我们上文提到的 Node.js RCE 利用方案，在 Node.js > 18 下已经失效。那么 Node.js 是怎么做到这一点的呢？
+
+<v-clicks>
+
+- lib: add `internalUtil.kEmptyObject` ([nodejs/node#43159](https://github.com/nodejs/node/pull/43159))
+
+  - 引入 `kEmptyObject` 来作为当 `func(arg, opt?)` 中 `opt` 为空时，默认的 `opt` 值
+
+    ```js
+    export const kEmptyObject = Object.freeze(Object.create(null));
+    const { foo, bar } = options ?? kEmptyObject;
+    ```
+
+- child_process: harden against prototype pollution ([nodejs/node#48726](https://github.com/nodejs/node/pull/48726))
+
+  - 将传入的 `options` 参数的 `__proto__` 属性强制覆盖为 `null`
+
+    ```diff
+    - options = { ...options };
+    + options = { __proto__: null, ...options };
+    ```
+
+- child_process: fix incomplete prototype pollution hardening ([nodejs/node#53781](https://github.com/nodejs/node/pull/53781))
+  - 修了上面漏掉的一个函数没处理 `__proto__` 的情况
+
+</v-clicks>
+
+---
+
+### 输入检查 & 过滤：Playground
+
+```js {monaco-run}
+/**
+ * @param {string} cmd
+ * @param {Object} options
+ */
+function execSync(cmd, options) {
+  options ??= {};
+  console.log(cmd, "options.shell", options.shell);
+  console.log(cmd, "options.env", options.env);
+}
+
+Object.prototype.shell = true;
+Object.prototype.env = {
+  EVIL: "console.log(require('child_process').execSync('touch /tmp/pp2rce').toString())//",
+};
+
+execSync("ls");
+execSync("ping", { outputs: ["inherit", "pipe", "pipe"] });
+```
+
+---
+
+### 输入检查 & 过滤：Ejs
+
+[mde/ejs@e469741](https://github.com/mde/ejs/commit/e469741dca7df2eb400199e1cdb74621e3f89aa5): Basic pollution protection
+
+```diff {all|7-10|27-35}{lines:true, maxHeight:'50%'}
+--- a/lib/ejs.js
++++ b/lib/ejs.js
+@@ -506,8 +506,8 @@ exports.clearCache = function () {
+   exports.cache.reset();
+ };
+
+-function Template(text, opts) {
+-  opts = opts || utils.createNullProtoObjWherePossible();
++function Template(text, optsParam) {
++  var opts = utils.hasOwnOnlyObject(optsParam);
+   var options = utils.createNullProtoObjWherePossible();
+   this.templateText = text;
+   /** @type {string | null} */
+@@ -949,3 +949,4 @@ exports.name = _NAME;
+ if (typeof window != 'undefined') {
+   window.ejs = exports;
+ }
++
+diff --git a/lib/utils.js b/lib/utils.js
+index a0434d58..396edb36 100644
+--- a/lib/utils.js
++++ b/lib/utils.js
+@@ -238,4 +238,13 @@ exports.createNullProtoObjWherePossible = (function () {
+   };
+ })();
+
++exports.hasOwnOnlyObject = function (obj) {
++  var o = exports.createNullProtoObjWherePossible();
++  for (var p in obj) {
++    if (hasOwn(obj, p)) {
++      o[p] = obj[p];
++    }
++  }
++  return o;
++};
+```
+
+<v-clicks at="1">
+
+- 在 `utils.createNullProtoObjWherePossible` 中，会创建一个没有原型链的对象。
+  - 基本和 Node.js 的 `Object.create(null)` 等价，但是因为 Ejs 需要考虑 ES5 兼容所以写的代码多些
+- 在 `utils.hasOwnOnlyObject` 中，会遍历传入的对象，并将其属性复制到一个新的对象中，并返回。
+  - `hasOwn` 是它在本地重定义的，基本等价于 `Object.prototype.hasOwnProperty`
+  - 这样 `__proto__` 这些不属于对象自身的属性就不会被复制到新的对象中
+
+</v-clicks>
+
+---
+
+### 输入检查 & 过滤：Playground 2
+
+```js {monaco-run}
+/**
+ * @param {string} str
+ * @param {Object} data
+ */
+function render(str, data) {
+  data ??= {};
+  console.log(str, data.escapeFunction);
+}
+
+Object.prototype.escapeFunction = 'console.log("PWNED")';
+
+render("<%= data.escapeFunction() %>");
+render("<%= data.escapeFunction() %>", {});
+```
+
+---
+
+### 使用安全的函数：进行安全的合并
+
+我们来修改我们最开始提供的例子：
+
+```js {monaco-run}
+// 危险的对象合并实现
+function merge(target, source) {
+  for (const key in source) {
+    if (typeof source[key] === "object" && source[key] !== null) {
+      if (!target[key]) {
+        target[key] = {};
+      }
+      merge(target[key], source[key]); // 递归陷阱
+    } else {
+      target[key] = source[key]; // 污染触发点
+    }
+  }
+}
+
+// 攻击者输入
+const maliciousPayload = JSON.parse('{"__proto__":{"isAdmin":true}}');
+merge({}, maliciousPayload); // 发起污染攻击
+
+console.log({}.isAdmin); // 输出 true
+```
+
+---
+
+### 使用安全的函数：安全的动态赋值
+
+```js {monaco-run}
+function setValue(obj, key, value) {
+  const segments = key.split(".");
+  const lastSegment = segments.pop();
+  for (const segment of segments) {
+    const accessor = Array.isArray(obj) ? +segment : segment;
+    // 这样安全吗？
+    // if (segment === "__proto__") continue;
+    if (!(accessor in obj)) obj[accessor] = {};
+    obj = obj[accessor];
+  }
+  obj[lastSegment] = value;
+}
+
+// 攻击向量
+setValue({}, "__proto__.polluted", "HACKED");
+
+// 灾难性后果
+console.log({}.polluted); // 输出 "HACKED"
+```
+
+---
+
+### 全局禁用对 `Object.prototype` 的修改
+
+| 方法                                         | 可添加属性 | 可删除属性 | 可修改属性值 | 可配置属性描述符 | 可修改原型 | 对象是否可扩展 |
+| -------------------------------------------- | ---------- | ---------- | ------------ | ---------------- | ---------- | -------------- |
+| `Object.freeze(Object.prototype)`            | ❌         | ❌         | ❌           | ❌               | ❌         | ❌             |
+| `Object.preventExtensions(Object.prototype)` | ❌         | ✅         | ✅           | ✅               | ✅         | ❌             |
+| `Object.seal(Object.prototype)`              | ❌         | ❌         | ✅           | ❌               | ❌         | ❌             |
+
+- 会导致一些 Polyfill 失效，在浏览器中使用时需要注意，可能会导致对旧版本浏览器的兼容性问题
+
+  - 比如 `Object.prototype.entries = function() { ... }` 等
+
+- 不会阻止修改除 `Object.prototype` 以外对象的原型链
+  - 比如 `Object.assign({}, JSON.parse('{"__proto__":{"polluted":"HACKED"}}')).polluted === "HACKED"`
+
+---
+
+### 全局禁用对 `__proto__` 的修改/访问：Node.js
+
+- 使用 `--disable-proto` 命令行参数来禁止对任何对象的 `[[Prototype]]` 属性的修改/访问
+  - `--disable-proto=delete` 删除所有对象的 `__proto__` 属性
+  - `--disable-proto=throw` 访问 `__proto__` 属性时抛出异常 `ERR_PROTO_ACCESS`
+  - 会阻止所有通过 `__proto__` 属性进行的原型链污染
+  - 但是对通过 `constructor.prototype` 进行的原型链污染无能为力
+  - 部分应用可能依赖 `__proto__` 属性，所以需要谨慎使用
+
+实际上，`__proto__` 是一个已经被弃用的特性，尽管大部分 JavaScript 运行时都仍然支持它，但是它已经被标记为弃用，并且不推荐使用。对于任何新写的代码，都不推荐使用 `__proto__` 属性，无论是访问还是赋值。
+
+---
+layout: image-right
+image: ./images/python-pp-meme.png
+---
+
+## Python 中的「原型链」污染
+
+Dunder 方法（也称为魔术方法）是所有 Python 对象在各种操作（例如 `__str__()`、`__eq__()` 和 `__call__()`）期间隐式调用的特殊方法。它们用于指定类的对象在各种语句和各种运算符中使用时应该做什么。Dunder 方法对于内置类有自己的默认实现，我们创建新类时将隐式继承这些方法，但是，开发人员可以在定义新类时覆盖这些方法并提供自己的实现。
+
+Python 中的每个对象中还有其他特殊属性，例如 `__class__`、`__doc__` 等，每个属性都有特定的用途。
+
+在 Python 中，我们没有原型，但我们有**特殊属性**。
+
+---
+
+### Python 类污染：基础
+
+```python {*}{lines:true}
+class Employee: pass # 创建一个空类
+
+emp = Employee()
+another_emp = Employee()
+
+Employee.name = 'No one' # 为 Employee 类定义一个属性
+print(emp.name)
+
+emp.name = 'Employee 1' # 为对象定义一个属性（覆盖类属性）
+print(emp.name)
+
+emp.say_hi = lambda: 'Hi there!' # 为对象定义一个方法
+print(emp.say_hi())
+
+Employee.say_bye = lambda s: 'Bye!' # 为 Employee 类定义一个方法
+print(emp.say_bye())
+
+Employee.say_bye = lambda s: 'Bye bye!' # 覆盖 Employee 类的方法
+print(another_emp.say_bye())
+
+#> No one
+#> Employee 1
+#> Hi there!
+#> Bye!
+#> Bye bye!
+```
+
+<!--
+在上面显示的代码中，我们创建了 Employee 类的一个实例，它是一个空类，然后为该对象定义了一个新属性和方法。可以在特定对象上定义属性和方法，以便该实例可以访问（非静态），或者在类上定义，以便该类的所有对象都可以访问它（静态）。
+
+Python 中的这个特性让我想知道为什么我们不能应用原型污染的相同概念，但这次是在 Python 中，通过利用所有对象都具有的特殊属性。从攻击者的角度来看，我们更感兴趣的是可以覆盖/重写的属性，以便能够利用这个漏洞，而不是魔术方法。因为我们的输入将始终被视为数据（str、int 等），而不是要评估的实际代码。因此，如果我们尝试覆盖任何魔术方法，当尝试调用该方法时，它会导致应用程序崩溃，因为字符串等数据无法执行。例如，在将其值设置为字符串后尝试调用 __str__() 方法会引发如下错误 TypeError: 'str' object is not callable。
+
+现在让我们尝试覆盖 Python 中任何对象的最重要的属性之一，即 __class__，该属性指向对象所属的类。
+-->
+
+---
+
+### Python 类污染：基础 2
+
+```python {*}{lines:true}
+class Employee: pass # 创建一个空类
+
+emp = Employee()
+emp.__class__ = 'Polluted'
+
+#> Traceback (most recent call last):
+#>   File "<stdin>", line 1, in <module>
+#> TypeError: __class__ must be set to a class, not 'str' object
+```
+
+<!--
+在我们的示例中，emp.__class__ 指向 Employee 类，因为它是该类的实例。您可以将 Python 中的 <instance>.__class__ 视为 JavaScript 中的 <instance>.constructor。
+
+即使我们在尝试将 emp 对象的 __class__ 属性设置为字符串时出错，该错误看起来很有希望！它表明 __class__ 必须设置为另一个类而不是字符串。这意味着它正在尝试用我们提供的内容覆盖该特殊属性，唯一的问题是我们尝试设置 __class__ 的值的数据类型。
+
+让我们尝试设置另一个接受字符串的属性，__class__ 的 __qualname__ 属性可能适合测试。__class__.__qualname__ 是一个包含类名的属性。
+-->
