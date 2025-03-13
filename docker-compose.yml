@@ -15,3 +15,8 @@ services:
     image: loginplease
     ports:
       - 5002:5001
+
+  challenges-pingline:
+    image: pingline
+    ports:
+      - 5003:3000
