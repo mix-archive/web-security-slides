@@ -27,12 +27,14 @@ build-%:
 # Pattern rule to save each challenge image as tar
 save-%:
 	@echo "Saving image $* as tar file"
-	@mkdir -p handouts
-	@docker save $* -o handouts/$*.tar
+	@mkdir -p handouts/docker handouts/sources
+	@docker save $* -o handouts/docker/$*.tar
+	@echo "Zipping git-tracked files in challenges/$*/"
+	@cd challenges/$*/ && git ls-files | zip -r ../../handouts/sources/$*.zip -@
 
 # Save all images as tar files
-save-images: $(SAVE_TARGETS)
-	@echo "All images saved to images/ directory"
+save-handouts: $(SAVE_TARGETS)
+	@echo "All handouts saved to handouts/ directory"
 
 # List all available challenges
 list:
