@@ -1,0 +1,17 @@
+[project]
+name = "ezflask"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [{ name = "Mix", email = "32300164+mnixry@users.noreply.github.com" }]
+dependencies = ["flask>=3.1.0"]
+requires-python = ">=3.13"
+readme = "README.md"
+license = { text = "MIT" }
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+distribution = true
