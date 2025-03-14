@@ -29,6 +29,9 @@ ENV NODE_ENV=production \
 COPY --from=builder --chown=app:app /app/.next/standalone ./
 COPY --from=builder --chown=app:app /app/.next/static ./.next/static
 
+ARG FLAG=flag{test_flag}
+RUN echo -n "${FLAG}" > /flag-$(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 32)
+
 USER app
 EXPOSE 3000
 ENV PORT=3000 \

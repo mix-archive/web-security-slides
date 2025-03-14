@@ -11,6 +11,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 COPY . .
 
-EXPOSE 3000
+ARG FLAG=flag{test_flag}
+ENV FLAG=${FLAG}
 
+EXPOSE 3000
 CMD ["pnpm", "start"]

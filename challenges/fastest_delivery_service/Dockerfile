@@ -15,12 +15,10 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
 COPY . .
-ENV FLAG="flag{i_h4d_s0me_0rderS_70_delIVeR_:D}"
+
+ARG FLAG="flag{test_flag}"
+RUN echo -n "${FLAG}" > /flag-$(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 32)
 
 EXPOSE 3000
-ENTRYPOINT ["tini", "--", "/bin/sh"]
-CMD ["-c", \
-    "echo -n '$FLAG' > /tmp/flag_$(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 32).txt &&\
-    unset FLAG && \
-    exec pnpm start"]
-
+ENTRYPOINT ["tini", "--"]
+CMD ["pnpm", "start"]

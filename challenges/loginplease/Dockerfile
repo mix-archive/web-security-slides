@@ -11,6 +11,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 COPY . .
 
+ARG FLAG=flag{test_flag}
+ENV FLAG=${FLAG}
+
 EXPOSE 5001
-ENV FLAG="ictf{omg_js_why_are_you_doing_this_to_me}"
 CMD ["pnpm", "start"]

@@ -16,7 +16,9 @@ all: $(CHALLENGE_TARGETS)
 build-%: 
 	@echo "Building challenge: $*"
 	@if [ -f challenges/$*/Dockerfile ]; then \
-		docker build -t $* challenges/$*; \
+		FLAG="flag{$$(uuidgen --namespace @oid --name $* --sha1)}"; \
+		echo "Flag: $$FLAG"; \
+		docker build -t $* --build-arg FLAG="$$FLAG" challenges/$*/; \
 	else \
 		echo "Error: Dockerfile not found in challenges/$*"; \
 		exit 1; \
