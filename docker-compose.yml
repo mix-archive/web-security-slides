@@ -20,3 +20,8 @@ services:
     image: pingline
     ports:
       - 5003:3000
+  
+  challenges-ciscn_sanic:
+    image: ciscn_sanic
+    ports:
+      - 5004:8000

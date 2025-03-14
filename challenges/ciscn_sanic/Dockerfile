@@ -8,19 +8,21 @@ COPY pyproject.toml pdm.lock README.md /project/
 COPY src/ /project/src
 
 WORKDIR /project
-RUN pdm install --check --prod --no-editable
+RUN --mount=type=cache,id=python,target=/root/.cache \
+    pdm install --check --prod --no-editable
 
 FROM python:slim
 
 COPY --from=builder /project/.venv/ /project/.venv
 ENV PATH="/project/.venv/bin:$PATH"
 
-COPY src /project/src
-COPY static /project/static
+WORKDIR /project
+COPY ./src ./src
+COPY ./static ./static
 
-ARG FLAG=flag{test}
+ARG FLAG=flag{test_flag}
 RUN echo -n "${FLAG}" > /flag-$(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 32)
 
 EXPOSE 8000
 ENTRYPOINT ["python", "-m", "sanic"]
-CMD ["ciscn_sanic:app"]
+CMD [ "--host", "0.0.0.0", "--port", "8000", "ciscn_sanic:app"]
