@@ -12,6 +12,7 @@
     "@slidev/cli": "^51.3.0",
     "@slidev/theme-default": "latest",
     "@slidev/theme-seriph": "latest",
+    "playwright-chromium": "^1.51.0",
     "prettier-plugin-slidev": "^1.0.5",
     "quickjs-emscripten": "^0.31.0",
     "vite-plugin-top-level-await": "^1.5.0",
