@@ -435,7 +435,9 @@ docker load -i funnylogin.tar
 docker run --rm -p 3000:3000 funnylogin
 ```
 
-看看如何使用漏洞组合，得到 Flag？
+服务运行后，访问 `http://localhost:3000/` 即可看到相关页面。
+
+如何使用漏洞组合，得到 Flag？
 
 ---
 
@@ -469,6 +471,8 @@ docker run --rm -p 3000:3000 funnylogin
 docker load -i loginplease.tar
 docker run --rm -p 5001:5001 loginplease
 ```
+
+服务运行后，访问 `http://localhost:5001/` 即可看到相关页面。
 
 请阅读源码，找到问题所在并得到 Flag。
 
@@ -1326,6 +1330,7 @@ docker load -i fastest_delivery_service.tar
 docker run --rm -p 3000:3000 fastest_delivery_service
 ```
 
+服务运行后，访问 `http://localhost:3000/` 即可看到相关页面。
 请尝试利用该服务的漏洞，得到 flag。
 
 ---
@@ -1632,6 +1637,8 @@ require("某个模块"); // 实际加载恶意脚本
 docker load -i pingline.tar
 docker run --rm -p 3000:3000 pingline
 ```
+
+服务运行后，访问 `http://localhost:3000/` 即可看到相关页面。
 
 请尝试利用该服务的漏洞，得到 flag。
 
@@ -2319,7 +2326,9 @@ docker load -i ezflask.tar
 docker run -d -p 8000:8000 ezflask
 ```
 
-如何使用先前提到的漏洞，得到 Flag?
+服务运行后，访问 `http://localhost:8000/` 即可看到相关页面。
+
+如何使用先前提到的漏洞，得到 Flag？
 
 ---
 
