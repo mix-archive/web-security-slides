@@ -25,3 +25,9 @@ services:
     image: ezflask
     ports:
       - 5004:8000
+
+  challenges-tanuki_udon:
+    image: tanuki_udon
+    ports:
+      - 5005:1337
+      - 5006:3000
