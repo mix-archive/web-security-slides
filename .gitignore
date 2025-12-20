@@ -4,5 +4,6 @@ dist
 *.local
 .vite-inspect
 .remote-assets
+.playwright-mcp
 components.d.ts
 handouts/

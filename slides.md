@@ -40,5 +40,5 @@ src: ./pages/prototype-pollution.md
 ---
 
 ---
-src: ./pages/cross-site-scripting.md
+src: ./pages/xss-restructured.md
 ---
